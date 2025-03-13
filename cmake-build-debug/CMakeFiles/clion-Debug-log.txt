@@ -1,16 +1,4 @@
 /Applications/CLion.app/Contents/bin/cmake/mac/aarch64/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_MAKE_PROGRAM=/Applications/CLion.app/Contents/bin/ninja/mac/aarch64/ninja -DCMAKE_C_COMPILER=/opt/homebrew/cellar/llvm/18.1.8/bin/clang -G Ninja -S /Users/hunterw./Documents/GitHub/PhragmoplastCurvatureCalculator -B /Users/hunterw./Documents/GitHub/PhragmoplastCurvatureCalculator/cmake-build-debug
--- The C compiler identification is Clang 18.1.8
--- The CXX compiler identification is Clang 18.1.8
--- Detecting C compiler ABI info
--- Detecting C compiler ABI info - done
--- Check for working C compiler: /opt/homebrew/cellar/llvm/18.1.8/bin/clang - skipped
--- Detecting C compile features
--- Detecting C compile features - done
--- Detecting CXX compiler ABI info
--- Detecting CXX compiler ABI info - done
--- Check for working CXX compiler: /opt/homebrew/cellar/llvm/18.1.8/bin/clang++ - skipped
--- Detecting CXX compile features
--- Detecting CXX compile features - done
--- Configuring done (3.1s)
+-- Configuring done (0.1s)
 -- Generating done (0.0s)
 -- Build files have been written to: /Users/hunterw./Documents/GitHub/PhragmoplastCurvatureCalculator/cmake-build-debug
