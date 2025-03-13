@@ -1,0 +1,7 @@
+# ninja log v5
+0	2378	1741494988382412241	CMakeFiles/PhragmoplastCurvatureCalculator.dir/main.cpp.o	9835840641f9d095
+1	57	1741498476623348544	build.ninja	58bfe2d3e091054
+2379	2542	1741494988546026276	PhragmoplastCurvatureCalculator	44e0d979ef501170
+0	59	1741498476623348544	build.ninja	58bfe2d3e091054
+1	263	1741498499625077001	CMakeFiles/PhragmoplastCurvatureCalculator.dir/main.cpp.o	9835840641f9d095
+263	379	1741498499745240950	PhragmoplastCurvatureCalculator	44e0d979ef501170
