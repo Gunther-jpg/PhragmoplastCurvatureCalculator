@@ -82,7 +82,10 @@ class Ellipse:
 
     def fitCurve(self, XYList:list, filedata): #XYList should be a list of (x,y) tuples
         t = sp.symbols("t")
+        XYList = [(np.float64(XY[0]), np.float64(XY[1])) for XY in XYList] #ensures all tuples contain numpy float64's
         XYList = np.array(XYList) #makes XYList usable with scikit-image's EllipseModel
+
+
 
         self.model = skim.EllipseModel
         self.model.estimate(self.model, XYList) #fits the model
@@ -122,6 +125,7 @@ class Ellipse:
 
     def findTClosestToPointOnEllipse(self, pointOfInterest: tuple) -> float:
         t = sp.symbols("t")
+        
         # Set up the parameterized equations of the ellipse being used
         X = sp.sympify(self.formula[0])
         Y = sp.sympify(self.formula[1])
@@ -152,7 +156,8 @@ class Ellipse:
         #finds the limits of integration m,n for the curvature function
         lowerBound = self.findTClosestToPointOnEllipse(filedata.XY[0])
         upperBound = self.findTClosestToPointOnEllipse(filedata.XY[-1])
-
+        
+        #update bounds to ensure 0<=t<=2pi, required for Simpson's Rule
         if lowerBound < 0:
             lowerBound = lowerBound + (sp.Abs(sp.floor(lowerBound/(2*sp.pi))) * 2*sp.pi)
         elif lowerBound > 2*sp.pi:
@@ -163,8 +168,12 @@ class Ellipse:
             upperBound = upperBound + (sp.Abs(sp.floor(upperBound/(2*sp.pi))) * 2*sp.pi)
         elif lowerBound > 2 * sp.pi:
             lowerBound = upperBound - (sp.floor(upperBound/(2*sp.pi)) * 2*sp.pi)
-
-
+        
+        #ensures upperBound is greater than lowerBound
+        if lowerBound > upperBound:
+            lowerBound, upperBound = upperBound, lowerBound
+        
+        
         # Implementation of Simpson's Rule
         numberOfSubIntervals = 100  # arbitrary number, I really rather not implement this in a way that loops until a particular tolerance is met
         stepLength = sp.sympify(sp.S(upperBound - lowerBound)/numberOfSubIntervals)

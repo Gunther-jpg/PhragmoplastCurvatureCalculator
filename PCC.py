@@ -53,27 +53,24 @@ def writeDataToCSV(dataList, outputDirectory):
         csvfile.close()
 
 #WIP
-def curvatureTests():
+def ellipseCurvatureTests():
+    filedata = FileData("testing")
+    xyData = []
+    
+    #Testing with a circle
+    for x in np.linspace(-1, 1, 20): xyData.append((x,np.sqrt(1 - x**2))) #generates points on the upper half of the unit circle
 
-    def circle(x,r):
-        return np.sqrt(r**2-x**2)
+    filedata.XY = xyData
+    filedata.ellipse.fitCurve(xyData,filedata)
+    curvature = filedata.ellipse.calculateCurvature(filedata)
+    error = np.abs(curvature - np.pi)
+    
+    if(error > 0.001):
+        print("Unit circle test failed")
+    
+    
 
-    data = []
-    model = None
-
-
-    #generates (x,y) tuples along the upper half of the unit circle
-    for num in np.linspace(-1,1, num=10):
-        data.append((num,circle(num,1)))
-
-
-
-
-
-
-
-
-    return 1
+    return 0
 
 def main():
     dataList = importData(data_path=DATA_DIRECTORY)
@@ -92,5 +89,5 @@ def main():
     print("Curvatures stored in the .csv in the data Directory")
     
     return 0
-
+ellipseCurvatureTests()
 main()
