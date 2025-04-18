@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 from Imports import *
 from Settings import *
@@ -20,14 +22,14 @@ class Parabola:
 
     #For a given rotation of XY data points, finds the coefficients of the parabola that fits best
     def findRotatedParabola(self, theta:float, filedata) -> float:
-        theta = math.radians(theta)
         predicted_values = []
+        rotatedXY = []
 
         for i in range(len(filedata.XY)):  # rotates the xy data by a given theta, in radians, probably
-            self.rotatedXY.append(rotate(ORIGIN, filedata.XY[i], theta))
+            rotatedXY.append(rotate(ORIGIN, filedata.XY[i], theta))
 
-        xData = [XY[0] for XY in self.rotatedXY]
-        yData = [XY[1] for XY in self.rotatedXY]
+        xData = [XY[0] for XY in rotatedXY]
+        yData = [XY[1] for XY in rotatedXY]
 
         results = scipy.optimize.curve_fit(f=self.standardParabola, xdata=xData, ydata=yData, p0=[1, 1, 1]) #p0 = a, b, c from ax^2+bx+c
         results = results[0] #selects just coefficients
@@ -46,10 +48,13 @@ class Parabola:
     def standardParabola(self, x, a, b, c):
         return a * x ** 2 + b * x + c
 
-    def fitCurve(self, XYList: list, filedata):
+    def fitCurve(self, filedata: FileData):
         #finds the optimal angle of rotation, theta, about the origin that minimizes the mean squared error associated with
         #the best fitting parabola for the given angle
-        self.coefficients['theta'] = scipy.optimize.brute(func=self.findRotatedParabola, ranges=[slice(0, 20, 0.1)], args=filedata, Ns=10)
+        self.rotation = scipy.optimize.brute(func=self.findRotatedParabola, ranges=[slice(0, 3.142 * 2, 0.01)], args=filedata, Ns=10)[0]
+
+        for XY in filedata.XY:
+            self.rotatedXY.append(rotate(ORIGIN, XY, self.rotation))
 
     def printFormula(self):
         print("\n" + sp.latex(sp.sympify(self.formula).subs({'a':self.coefficients['a'], 'b':self.coefficients['b'], 'c':self.coefficients['c']})))
@@ -66,6 +71,10 @@ class Parabola:
 
         return abs((X0Curvature - XnCurvature).evalf())  # total curvature from X0 to XN - the definite integral of curvature
 
+    def printRotatedXY(self):
+        for XY in self.rotatedXY:
+            print(str(XY[0]) + "," + str(XY[1]))
+
 #stores information associated with ellipses and elliptic fitting
 class Ellipse:
     coefficients: dict
@@ -80,7 +89,8 @@ class Ellipse:
         self.coefficients = dict()
         self.meanAbsolutePercentageError = -1.0
 
-    def fitCurve(self, XYList:list, filedata): #XYList should be a list of (x,y) tuples
+    def fitCurve(self, filedata:FileData): #XYList should be a list of (x,y) tuples
+        XYLit = filedata.XY
         t = sp.symbols("t")
         XYList = [(np.float64(XY[0]), np.float64(XY[1])) for XY in XYList] #ensures all tuples contain numpy float64's
         XYList = np.array(XYList) #makes XYList usable with scikit-image's EllipseModel
@@ -122,7 +132,6 @@ class Ellipse:
         output = sp.sympify(self.curvatureFormula).subs(self.coefficients).subs('t',t)
         return output.evalf()
 
-
     def findTClosestToPointOnEllipse(self, pointOfInterest: tuple) -> float:
         t = sp.symbols("t")
         
@@ -145,8 +154,7 @@ class Ellipse:
 
         return output.x[0]
 
-
-    def calculateCurvature(self, filedata):
+    def calculateCurvature(self, filedata:FileData):
         curvature = 0.0
 
         xc, yc, a, b, theta, m, n = sp.symbols('xc, yc, a, b, theta, m, n', real=True)  # Declare sympy symbols
@@ -186,6 +194,67 @@ class Ellipse:
     def printFormula(self):
         print("\n" + "(" + sp.latex(sp.sympify(self.formula[0]).subs(self.coefficients)) + ", " + sp.latex(sp.sympify(self.formula[1]).subs(self.coefficients)) + ")")
 
+#stores information associated with Bézier and Bézier curve fitting
+class Bezier:
+    meanAbsolutePercentageError: float
+    controlPoints: np.ndarray
+    curve: None
+
+    #loop until some tolerance is met
+        #find the ideal locations of control points
+
+    def __init__(self):
+        meanAbsolutePercentageError = -1.0
+
+    def bezierExpression(self, numControlPoints:int, coefficients:list) -> sp.Expr:
+        t = sp.symbols("t") #parameterized value
+        expression = ""
+
+        #implementation of De Casteljau's algorithm, a closed form solution for calculating bezier curves of an arbitrary degree
+        for i in range(len(numControlPoints)):
+            expression += coefficients[i] * binom(numControlPoints, i) * (1-t)**(numControlPoints - i) * t**i
+        expression = sp.S(expression)
+
+        return expression
+
+    #when called, the last arg must be an instance of FileData
+    def curveError(self, *args):
+        XYList = args[-1].XY
+        curve = bezierExpression(len(args) - 1, args[:-2]) #gets the bezier curve as a sympy expression
+        curveDerivative = sp.diff(curve, t)
+        curveFunction = sp.lambdify(t, curve, modules='numpy')
+
+        def distanceFromBezier(t, point:tuple) -> float: #not really distance, it determines the dot product between
+                                                         #curveDerivative at t and the curve at t minus the point of interest
+            nonlocal curve, curveFunction, curveDerivative
+            distance = (curveFunction(t) - point[1]).dot(curveDerivative(t)) #will be zero if curveDerivative is perpendicular to (curveFunction(t) - point[1])
+
+            return distance
+
+        for XY in XYList:
+            yTrue.append(XYList[1])
+            predicted = minimize(func=distanceFromBezier, x0=1, args=XY, method='brute').x[0]
+            yPred.append(predicted)
+
+        mean_absolute_percentage_error(y_true=yTrue, y_pred=yPred) * 100
+
+
+    def fitCurve(self, filedata:FileData):
+        tolerance = 0.1
+        error = 100
+
+        while True: #iteratively refines the bezier curve by adding more control points until error falls below tolerance
+            
+            if(error < tolerance):
+                break
+
+
+
+    def calculateCurvature(self, XYList:list, filedata:FileData):
+        return 0
+
+
+
 
 # stores data associated with each xy-coordinate file, such as name, the method that provides the best curve fitting, etc
 # along with associated functions for displaying or calculating various attributes
@@ -214,7 +283,7 @@ class FileData:
                 self.bestFitType = "Parabola"
 
     def fitCurve(self, curve: Parabola | Ellipse):
-        curve.fitCurve(XYList=self.XY, filedata=self)
+        curve.fitCurve(filedata=self)
 
         self.updateBestFitType()
 
@@ -244,11 +313,6 @@ class FileData:
     def printXY(self):
         for i in range(len(self.XY)):
             print(str(self.XY[i][0]) + "\t" + str(self.XY[i][1]))
-
-    def printRotatedCoords(self, angle):
-        for i in range(len(self.XY)):
-            temp = rotate(ORIGIN, self.XY[i], angle)
-            print(str(temp[0]) + "\t" + str(temp[1]))
 
 
 

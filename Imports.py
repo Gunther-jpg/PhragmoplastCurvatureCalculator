@@ -16,6 +16,7 @@ from pathlib import Path
 from pickle import GLOBAL
 from dataclasses import dataclass
 
+from scipy.special import binom
 from scipy.optimize import curve_fit
 from scipy.optimize import minimize
 from scipy.integrate import simpson

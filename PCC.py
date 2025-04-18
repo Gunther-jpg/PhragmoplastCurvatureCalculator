@@ -75,19 +75,21 @@ def ellipseCurvatureTests():
 def main():
     dataList = importData(data_path=DATA_DIRECTORY)
 
+    playingWith = Bezier()
+    playingWith.fitCurve(dataList[0])
+
     for i in range(len(dataList)):
         dataList[i].findCurvature() #iterates through list, calculating curvature
         print(dataList[i].filename)
         # dataList[i].printXY()
-        # dataList[i].parabola.printFormula()
-        dataList[i].ellipse.printFormula()
+        dataList[i].parabola.printFormula()
+        #dataList[i].ellipse.printFormula()
 
-    # print(str(sp.sympify(dataList[3].ellipse.curvatureFormula[0]).subs(dataList[3].ellipse.coefficients).subs("t",2).evalf()) + "," + str(
-    #     sp.sympify(dataList[3].ellipse.curvatureFormula[1]).subs(dataList[3].ellipse.coefficients).subs("t", 2).evalf()))
+    dataList[0].parabola.printRotatedXY()
+
 
     writeDataToCSV(dataList,DATA_DIRECTORY)
     print("Curvatures stored in the .csv in the data Directory")
     
     return 0
-ellipseCurvatureTests()
 main()
