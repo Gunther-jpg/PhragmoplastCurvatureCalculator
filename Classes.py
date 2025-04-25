@@ -90,7 +90,7 @@ class Ellipse:
         self.meanAbsolutePercentageError = -1.0
 
     def fitCurve(self, filedata:FileData): #XYList should be a list of (x,y) tuples
-        XYLit = filedata.XY
+        XYList = filedata.XY
         t = sp.symbols("t")
         XYList = [(np.float64(XY[0]), np.float64(XY[1])) for XY in XYList] #ensures all tuples contain numpy float64's
         XYList = np.array(XYList) #makes XYList usable with scikit-image's EllipseModel
@@ -150,7 +150,7 @@ class Ellipse:
         distanceFromPointToEllipse = lambda T, x, y: ((X(T) - x) ** 2 + (Y(T) - y) ** 2)
 
         x0 = np.array([0], dtype=np.float64)
-        output = minimize(fun=distanceFromPointToEllipse, x0=x0, method='nelder-mead',args=(pointOfInterest[0],pointOfInterest[1]))
+        output = scipy.optimize.minimize(fun=distanceFromPointToEllipse, x0=x0, method='nelder-mead',args=(pointOfInterest[0],pointOfInterest[1]))
 
         return output.x[0]
 
@@ -198,56 +198,99 @@ class Ellipse:
 class Bezier:
     meanAbsolutePercentageError: float
     controlPoints: np.ndarray
-    curve: None
+    curve: dict
 
     #loop until some tolerance is met
         #find the ideal locations of control points
 
     def __init__(self):
         meanAbsolutePercentageError = -1.0
+        curve = {}
 
-    def bezierExpression(self, numControlPoints:int, coefficients:list) -> sp.Expr:
-        t = sp.symbols("t") #parameterized value
-        expression = ""
+    def rationalBezierExpression(self, numControlPoints:int, controlPoints:list[tuple,...], weights:list[float]) -> tuple:
+        """ Returns the rational bezier expression for x and y in terms of t as sympy expressions """
 
-        #implementation of De Casteljau's algorithm, a closed form solution for calculating bezier curves of an arbitrary degree
-        for i in range(len(numControlPoints)):
-            expression += coefficients[i] * binom(numControlPoints, i) * (1-t)**(numControlPoints - i) * t**i
-        expression = sp.S(expression)
+        xExpression = sp.S("0")
+        yExpression = sp.S("0")
+        divisor = sp.S("0")
+        t = sp.symbols("t", real=True) #parameterized value
 
-        return expression
+
+        #implementation of a rational Bézier curve using De Casteljau's algorithm, a closed form solution for calculating Bézier curves of an arbitrary degree
+        for i in range(numControlPoints):
+            divisor +=  weights[i] * binom(numControlPoints, i) * (1-t)**(numControlPoints - i) * t**i
+            xExpression += weights[i] * controlPoints[i][0] * binom(numControlPoints, i) * (1-t)**(numControlPoints - i) * t**i
+            yExpression += weights[i] * controlPoints[i][1] * binom(numControlPoints, i) * (1-t)**(numControlPoints - i) * t**i
+        xExpression, yExpression = sp.S(xExpression/divisor), sp.S(yExpression/divisor)
+
+
+        return xExpression, yExpression
 
     #when called, the last arg must be an instance of FileData
     def curveError(self, *args):
-        XYList = args[-1].XY
-        curve = bezierExpression(len(args) - 1, args[:-2]) #gets the bezier curve as a sympy expression
-        curveDerivative = sp.diff(curve, t)
-        curveFunction = sp.lambdify(t, curve, modules='numpy')
 
-        def distanceFromBezier(t, point:tuple) -> float: #not really distance, it determines the dot product between
-                                                         #curveDerivative at t and the curve at t minus the point of interest
-            nonlocal curve, curveFunction, curveDerivative
-            distance = (curveFunction(t) - point[1]).dot(curveDerivative(t)) #will be zero if curveDerivative is perpendicular to (curveFunction(t) - point[1])
+        XYList = args[-1]
+        controlPoints, weights = [],[]
 
-            return distance
+        t = sp.symbols("t", real=True)
 
+        for i in range(int(len(args[0])/3)): #sorts args into control points and weights, to generate a rational bezier expression
+            controlPoints.append((args[0][i*3], args[0][i*3 + 1]))
+            weights.append(args[0][i*3 + 2])
+
+        #creates rational bezier curves x(t) and y(t) as sympy lambda functions for quick evaluation when measuring curve error
+        xCurve, yCurve = self.rationalBezierExpression(numControlPoints=len(controlPoints), controlPoints=controlPoints, weights=weights)
+        xCurve, yCurve = sp.lambdify(t, xCurve, modules="numpy"), sp.lambdify(t, yCurve, modules="numpy")
+
+        def distanceFromBezier(t:float, xCoord:float, yCoord:float) -> float:
+            nonlocal xCurve, yCurve
+
+            if isinstance(t, np.ndarray):
+                t = t[0]
+
+            output = sp.sqrt((xCurve(t)-xCoord)**2 + (yCurve(t)-yCoord)**2).evalf()
+            return output
+
+        #appends the true y value and the y value predicted from the Bézier curve to yTrue and yPred, respectively, to calculate error
+        yTrue, yPred = [], []
         for XY in XYList:
-            yTrue.append(XYList[1])
-            predicted = minimize(func=distanceFromBezier, x0=1, args=XY, method='brute').x[0]
+            yTrue.append(XY[1])
+            predicted = scipy.optimize.minimize(fun=distanceFromBezier, x0=0.5, args=XY, method='Nelder-Mead',
+                                                bounds=scipy.optimize.Bounds(lb=0.0000001,ub=0.9999999)).x[0]
             yPred.append(predicted)
 
-        mean_absolute_percentage_error(y_true=yTrue, y_pred=yPred) * 100
+        error = mean_absolute_percentage_error(y_true=yTrue, y_pred=yPred) * 100
+        return error
 
-
+    #fits a rational Bézier curve to the data set by optimizing control points, control point weights, and
+    # elevating the degree of the curve as necessary
     def fitCurve(self, filedata:FileData):
         tolerance = 0.1
         error = 100
+        iterationCounter = 0
 
-        while True: #iteratively refines the bezier curve by adding more control points until error falls below tolerance
-            
-            if(error < tolerance):
+        controlPoints = [filedata.XY[0][0], filedata.XY[0][1], 1, #formatted as [x1, y1, weight1, x2, y2, weight2, xn, yn weightn]
+                         filedata.XY[1][0], filedata.XY[1][1], 1,
+                         filedata.XY[-1][0], filedata.XY[-1][1], 1]
+        numberControlPoints = len(controlPoints)/3
+
+        while True: #iteratively refines the Bézier curve by adding more control points until error falls below tolerance
+            numberControlPoints = int(len(controlPoints)/3)
+            controlPoints = scipy.optimize.minimize(fun=self.curveError, x0=controlPoints, args=filedata.XY, method='Nelder-Mead').x #optimizes control points
+
+            #calculate error
+            error = self.curveError(controlPoints, filedata.XY)
+            if error < tolerance or iterationCounter > 10:
                 break
 
+            iterationCounter += 1
+
+            #do a poor excuse for degree elevation
+            #np.insert(controlPoints,3,np.mean([controlPoints[0],controlPoints[4]])) #inserts the mean of the first two x entries in control points
+            #np.insert(controlPoints, 4, np.mean([controlPoints[1], controlPoints[5]])) #inserts the mean of the first two y entries in control points
+            #np.insert(controlPoints,5, np.mean([controlPoints[2], controlPoints[6]])) #inserts the mean of the first two weight entries in control points
+
+        print(str(error) + str(controlPoints))
 
 
     def calculateCurvature(self, XYList:list, filedata:FileData):
