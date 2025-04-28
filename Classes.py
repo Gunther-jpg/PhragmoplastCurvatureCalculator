@@ -267,12 +267,21 @@ class Bezier:
     def fitCurve(self, filedata:FileData):
         tolerance = 0.1
         error = 100
-        iterationCounter = 0
+        iterationCounter = 1
 
         controlPoints = [filedata.XY[0][0], filedata.XY[0][1], 1, #formatted as [x1, y1, weight1, x2, y2, weight2, xn, yn weightn]
                          filedata.XY[1][0], filedata.XY[1][1], 1,
                          filedata.XY[-1][0], filedata.XY[-1][1], 1]
         numberControlPoints = len(controlPoints)/3
+
+        #set up plotting - for debugging purposes
+        # fig, axs = plt.subplots(1,6)
+        # xoriginal = [XY[0] for XY in filedata.XY]
+        # yoriginal = [XY[1] for XY in filedata.XY]
+        # self.plotter(axs[0],xoriginal,yoriginal)
+
+        t = sp.symbols("t", real=True)
+        tlinspace = np.linspace(0.001,1,30,endpoint=False)
 
         while True: #iteratively refines the Bézier curve by adding more control points until error falls below tolerance
             numberControlPoints = int(len(controlPoints)/3)
@@ -280,17 +289,35 @@ class Bezier:
 
             #calculate error
             error = self.curveError(controlPoints, filedata.XY)
-            if error < tolerance or iterationCounter > 10:
+
+            # #for plotting Bézier curves
+            # ctrlPoints, weights = [], []
+            # for i in range(numberControlPoints):
+            #     ctrlPoints.append((controlPoints[i * 3], controlPoints[i * 3 + 1]))
+            #     weights.append(controlPoints[i * 3 + 2])
+            #
+            # xCurve, yCurve = self.rationalBezierExpression(numControlPoints=numberControlPoints,controlPoints=ctrlPoints, weights=weights)
+            # xCurve, yCurve = sp.lambdify(t, xCurve, modules="numpy"), sp.lambdify(t, yCurve, modules="numpy")
+            #
+            # xdata, ydata = [xCurve(i) for i in tlinspace], [yCurve(i) for i in tlinspace]
+            # self.plotter(axs[iterationCounter],xdata,ydata)
+
+            print(str(error) + str(controlPoints))
+
+            if error < tolerance or iterationCounter > 4:
                 break
 
             iterationCounter += 1
 
-            #do a poor excuse for degree elevation
-            #np.insert(controlPoints,3,np.mean([controlPoints[0],controlPoints[4]])) #inserts the mean of the first two x entries in control points
-            #np.insert(controlPoints, 4, np.mean([controlPoints[1], controlPoints[5]])) #inserts the mean of the first two y entries in control points
-            #np.insert(controlPoints,5, np.mean([controlPoints[2], controlPoints[6]])) #inserts the mean of the first two weight entries in control points
+            #does a poor excuse for degree elevation
+            newPoint = [np.mean([controlPoints[0],controlPoints[3]]), np.mean([controlPoints[1], controlPoints[4]]), 1]
+            controlPoints = np.insert(arr=controlPoints,obj=3,values=newPoint)
 
-        print(str(error) + str(controlPoints))
+    def plotter(self, ax, xdata, ydata, param_dict={}):
+        """ A helper function to make a graph. """
+        out = ax.plot(xdata, ydata, **param_dict)
+        return out
+
 
 
     def calculateCurvature(self, XYList:list, filedata:FileData):

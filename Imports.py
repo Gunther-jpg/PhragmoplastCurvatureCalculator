@@ -9,6 +9,7 @@ import traceback
 import sympy as sp
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 import scipy.optimize
 import skimage.measure as skim
 
