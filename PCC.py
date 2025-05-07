@@ -16,7 +16,7 @@ def importData(data_path) -> list:
 
             output.append(copy.deepcopy(FileData(filename=str(path).split("/")[-1]))) #creates new filedata item with name of the file currently being read
 
-            data = pd.read_csv(str(path)).values.tolist()
+            data = pd.read_csv(str(path), header=None).values.tolist()
 
             for i in range(len(data)): #splits each string of XY coords into a list containing an X and Y coord
                 data[i] = data[i][0].rsplit("\t")
@@ -52,30 +52,20 @@ def writeDataToCSV(dataList, outputDirectory):
         writer.writerows(csvData)
         csvfile.close()
 
-#WIP
-def ellipseCurvatureTests():
-    filedata = FileData("testing")
-    xyData = []
-    
-    #Testing with a circle
-    for x in np.linspace(-1, 1, 20): xyData.append((x,np.sqrt(1 - x**2))) #generates points on the upper half of the unit circle
-
-    filedata.XY = xyData
-    filedata.ellipse.fitCurve(xyData,filedata)
-    curvature = filedata.ellipse.calculateCurvature(filedata)
-    error = np.abs(curvature - np.pi)
-    
-    if(error > 0.001):
-        print("Unit circle test failed")
-    
-    
-
-    return 0
 
 def main():
     dataList = importData(data_path=DATA_DIRECTORY)
 
     playingWith = Bezier()
+
+    # controlPoints = [(83,140), (94,117), (117,97), (148,90), (173,97), (191,118), (199,140)]
+    # numControlPoints = 7
+    # weights = [1, 1, 1, 1, 1, 1, 1]
+
+
+    #out1, out2 = playingWith.rationalBezierExpression(numControlPoints, controlPoints, weights, do_division=True)
+    #print(str(sp.latex(out1)) + "\n" + str(str(sp.latex(out2))))
+
     playingWith.fitCurve(dataList[0])
 
     for i in range(len(dataList)):

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import copy
+
 import numpy as np
+import scipy.optimize
 from Imports import *
 from Settings import *
 
@@ -94,7 +97,6 @@ class Ellipse:
         t = sp.symbols("t")
         XYList = [(np.float64(XY[0]), np.float64(XY[1])) for XY in XYList] #ensures all tuples contain numpy float64's
         XYList = np.array(XYList) #makes XYList usable with scikit-image's EllipseModel
-
 
 
         self.model = skim.EllipseModel
@@ -197,50 +199,64 @@ class Ellipse:
 #stores information associated with Bézier and Bézier curve fitting
 class Bezier:
     meanAbsolutePercentageError: float
-    controlPoints: np.ndarray
+    control_points: np.ndarray
     curve: dict
 
     #loop until some tolerance is met
         #find the ideal locations of control points
 
     def __init__(self):
-        meanAbsolutePercentageError = -1.0
-        curve = {}
+        self.meanAbsolutePercentageError = -1.0
+        self.curve = dict()
 
-    def rationalBezierExpression(self, numControlPoints:int, controlPoints:list[tuple,...], weights:list[float]) -> tuple:
+    def rationalBezierExpression(self, num_control_points:int, control_points:list[tuple], weights:list[float], do_rational=True) -> tuple:
         """ Returns the rational bezier expression for x and y in terms of t as sympy expressions """
 
-        xExpression = sp.S("0")
-        yExpression = sp.S("0")
-        divisor = sp.S("0")
+        xExpression = 0
+        yExpression = 0
+        divisor = 0
         t = sp.symbols("t", real=True) #parameterized value
 
 
         #implementation of a rational Bézier curve using De Casteljau's algorithm, a closed form solution for calculating Bézier curves of an arbitrary degree
-        for i in range(numControlPoints):
-            divisor +=  weights[i] * binom(numControlPoints, i) * (1-t)**(numControlPoints - i) * t**i
-            xExpression += weights[i] * controlPoints[i][0] * binom(numControlPoints, i) * (1-t)**(numControlPoints - i) * t**i
-            yExpression += weights[i] * controlPoints[i][1] * binom(numControlPoints, i) * (1-t)**(numControlPoints - i) * t**i
-        xExpression, yExpression = sp.S(xExpression/divisor), sp.S(yExpression/divisor)
+        current_binomial_term = 0
+        for i in range(num_control_points):
+            current_binomial_term = binom(num_control_points - 1, i)
+            divisor +=  weights[i] * current_binomial_term * (1-t)**(num_control_points - i - 1) * t**i
+            xExpression += weights[i] * control_points[i][0] * current_binomial_term * (1-t)**(num_control_points - i - 1) * t**i
+            yExpression += weights[i] * control_points[i][1] * current_binomial_term * (1-t)**(num_control_points - i - 1) * t**i
+        if(do_rational):
+            xExpression, yExpression = (xExpression/divisor), (yExpression/divisor)
 
 
         return xExpression, yExpression
 
     #when called, the last arg must be an instance of FileData
     def curveError(self, *args):
+        warnings.filterwarnings("ignore")
 
         XYList = args[-1]
-        controlPoints, weights = [],[]
+        control_points, weights = [],[]
 
-        t = sp.symbols("t", real=True)
+        x,y = sp.symbols("x,y", real=True)
+        t = sp.symbols("t", real=True, positive=True)
 
-        for i in range(int(len(args[0])/3)): #sorts args into control points and weights, to generate a rational bezier expression
-            controlPoints.append((args[0][i*3], args[0][i*3 + 1]))
-            weights.append(args[0][i*3 + 2])
+        num_control_points = int(len(args[0])/3)
+
+        for i in range(num_control_points): #sorts args into control points and weights, to generate a rational bezier expression
+            weights.append(args[0][i])
+            control_points.append((args[0][num_control_points + 2*i], args[0][num_control_points + 2*i + 1]))
+
 
         #creates rational bezier curves x(t) and y(t) as sympy lambda functions for quick evaluation when measuring curve error
-        xCurve, yCurve = self.rationalBezierExpression(numControlPoints=len(controlPoints), controlPoints=controlPoints, weights=weights)
+        xCurve, yCurve = self.rationalBezierExpression( do_rational=True, num_control_points=len(control_points), control_points=control_points, weights=weights)
+
+        self.curve["xCurve"] = copy.deepcopy(xCurve)
+        self.curve["yCurve"] = copy.deepcopy(yCurve)
+
+        find_t_from_x = sp.lambdify([t,x], xCurve)
         xCurve, yCurve = sp.lambdify(t, xCurve, modules="numpy"), sp.lambdify(t, yCurve, modules="numpy")
+
 
         def distanceFromBezier(t:float, xCoord:float, yCoord:float) -> float:
             nonlocal xCurve, yCurve
@@ -251,72 +267,115 @@ class Bezier:
             output = sp.sqrt((xCurve(t)-xCoord)**2 + (yCurve(t)-yCoord)**2).evalf()
             return output
 
-        #appends the true y value and the y value predicted from the Bézier curve to yTrue and yPred, respectively, to calculate error
-        yTrue, yPred = [], []
-        for XY in XYList:
-            yTrue.append(XY[1])
-            predicted = scipy.optimize.minimize(fun=distanceFromBezier, x0=0.5, args=XY, method='Nelder-Mead',
-                                                bounds=scipy.optimize.Bounds(lb=0.0000001,ub=0.9999999)).x[0]
-            yPred.append(predicted)
 
-        error = mean_absolute_percentage_error(y_true=yTrue, y_pred=yPred) * 100
+        #appends the true y value and the y value predicted from the Bézier curve to yTrue and yPred, respectively, to calculate error
+        true_y, predicted_y = [], []
+        for XY in XYList:
+            true_y.append(XY[1])
+
+            predicted_t = scipy.optimize.fsolve(func=find_t_from_x, args=XY[0], x0=0.5)[0]
+            predicted_y.append(scipy.optimize.minimize(fun=distanceFromBezier, x0=predicted_t, args=XY, method='Nelder-Mead',
+                                              bounds=scipy.optimize.Bounds(lb=0.0000001,ub=0.9999999)).x[0])
+
+        error = mean_absolute_percentage_error(y_true=true_y, y_pred=predicted_y) * 100
         return error
 
     #fits a rational Bézier curve to the data set by optimizing control points, control point weights, and
     # elevating the degree of the curve as necessary
     def fitCurve(self, filedata:FileData):
+        multiplier = 1
         tolerance = 0.1
         error = 100
         iterationCounter = 1
 
-        controlPoints = [filedata.XY[0][0], filedata.XY[0][1], 1, #formatted as [x1, y1, weight1, x2, y2, weight2, xn, yn weightn]
-                         filedata.XY[1][0], filedata.XY[1][1], 1,
-                         filedata.XY[-1][0], filedata.XY[-1][1], 1]
-        numberControlPoints = len(controlPoints)/3
 
-        #set up plotting - for debugging purposes
-        # fig, axs = plt.subplots(1,6)
-        # xoriginal = [XY[0] for XY in filedata.XY]
-        # yoriginal = [XY[1] for XY in filedata.XY]
-        # self.plotter(axs[0],xoriginal,yoriginal)
+        control_points = [filedata.XY[0][0], filedata.XY[0][1], #formatted as [weight1, x1, y1, weight2, x2, y2, weightn, xn, yn]
+                         filedata.XY[int(len(filedata.XY)/2)][0], filedata.XY[int(len(filedata.XY)/2)][1],
+                         filedata.XY[-1][0], filedata.XY[-1][1]]
 
-        t = sp.symbols("t", real=True)
-        tlinspace = np.linspace(0.001,1,30,endpoint=False)
+        control_weights = [1, 1, 1]
+
+        number_of_control_points = len(control_weights)
+        temp_x, temp_y = zip(*filedata.XY)
+
+        x_bounds = (min(temp_x) / multiplier, max(temp_x) * multiplier)
+        y_bounds = (min(temp_y) / multiplier, max(temp_y) * multiplier)
+        weight_bounds = (0,5)
+        bounds = [weight_bounds, weight_bounds, weight_bounds,
+                  x_bounds, y_bounds,
+                  x_bounds, y_bounds,
+                  x_bounds, y_bounds]
 
         while True: #iteratively refines the Bézier curve by adding more control points until error falls below tolerance
-            numberControlPoints = int(len(controlPoints)/3)
-            controlPoints = scipy.optimize.minimize(fun=self.curveError, x0=controlPoints, args=filedata.XY, method='Nelder-Mead').x #optimizes control points
+            #control_points = scipy.optimize.minimize(fun=self.curveError, x0=control_points, args=filedata.XY, method='Nelder-Mead') #optimizes control points
+            control_points = scipy.optimize.basinhopping(func=self.curveError, x0=control_weights + control_points, minimizer_kwargs={"args":filedata.XY}).x
+            control_weights = control_points[:number_of_control_points]
+            control_points = control_points[number_of_control_points:]
+
 
             #calculate error
-            error = self.curveError(controlPoints, filedata.XY)
+            error = self.curveError(control_points, filedata.XY)
 
-            # #for plotting Bézier curves
-            # ctrlPoints, weights = [], []
-            # for i in range(numberControlPoints):
-            #     ctrlPoints.append((controlPoints[i * 3], controlPoints[i * 3 + 1]))
-            #     weights.append(controlPoints[i * 3 + 2])
-            #
-            # xCurve, yCurve = self.rationalBezierExpression(numControlPoints=numberControlPoints,controlPoints=ctrlPoints, weights=weights)
-            # xCurve, yCurve = sp.lambdify(t, xCurve, modules="numpy"), sp.lambdify(t, yCurve, modules="numpy")
-            #
-            # xdata, ydata = [xCurve(i) for i in tlinspace], [yCurve(i) for i in tlinspace]
-            # self.plotter(axs[iterationCounter],xdata,ydata)
+            #print(str(sp.latex(self.curve["xCurve"])) + "\n" + str(sp.latex(self.curve["yCurve"])))
+            print(str(error) + "\t" + str(control_points) + "\n")
 
-            print(str(error) + str(controlPoints))
-
-            if error < tolerance or iterationCounter > 4:
+            #checks if conditions are met to exit loop
+            if error < tolerance or iterationCounter > 3:
                 break
-
             iterationCounter += 1
 
-            #does a poor excuse for degree elevation
-            newPoint = [np.mean([controlPoints[0],controlPoints[3]]), np.mean([controlPoints[1], controlPoints[4]]), 1]
-            controlPoints = np.insert(arr=controlPoints,obj=3,values=newPoint)
+            temp = []
+            for i in range(int(len(control_points)/2)):
+                temp.append((control_points[2*i],control_points[2*i + 1]))
 
-    def plotter(self, ax, xdata, ydata, param_dict={}):
-        """ A helper function to make a graph. """
-        out = ax.plot(xdata, ydata, **param_dict)
-        return out
+            old_curve_x, old_curve_y =  self.rationalBezierExpression(len(temp), temp, control_weights)
+
+            new_points, new_weights = self.elevateDegree(control_points, control_weights)
+
+            temp = []
+            for i in range(int(len(new_points)/2)):
+                temp.append((new_points[2*i],new_points[2*i + 1]))
+
+            new_curve_x, new_curve_y = self.rationalBezierExpression(len(temp), temp, new_weights)
+            print(str(sp.latex(old_curve_x)) + "\n" + str(sp.latex(old_curve_y)))
+            print(str(sp.latex(new_curve_x)) + "\n" + str(sp.latex(new_curve_y)))
+
+            bounds.insert(0, weight_bounds)
+            bounds.append(x_bounds)
+            bounds.append(y_bounds)
+
+            control_points = new_points
+            control_weights = new_weights
+
+    #executes degree elevation of a rational Bézier curve, as described in Gerald Fin's Curves and Surfaces for Computer Aided Geometric Design, section 15.4
+    def elevateDegree(self, control_points:list[float], control_weights:list[float]):
+        temp = []
+        for i in range(int(len(control_points) / 2)):
+            temp.append((control_points[2 * i], control_points[2 * i + 1]))
+        control_points = temp
+
+
+        new_number_of_control_points = len(control_points) + 1
+        elevated_control_points = []
+        elevated_control_weights = []
+
+        elevated_control_points.append((control_weights[0] * control_points[0][0]) / control_weights[0])
+        elevated_control_points.append((control_weights[0] * control_points[0][1]) / control_weights[0])
+        elevated_control_weights.append(control_weights[0])
+
+        for i in range(1, int(len(control_points))):
+            alpha = i / new_number_of_control_points
+            elevated_control_points.append(
+                (control_weights[i - 1] * alpha * control_points[i-1][0] + control_weights[i] * (1 - alpha) * control_points[i][0]) / (control_weights[i - 1] * alpha + control_weights[i] * (1 - alpha)))
+            elevated_control_points.append(
+                (control_weights[i - 1] * alpha * control_points[i-1][1] + control_weights[i] * (1 - alpha) * control_points[i][1]) / (control_weights[i - 1] * alpha + control_weights[i] * (1 - alpha)))
+            elevated_control_weights.append(control_weights[i - 1] * alpha + control_weights[i] * (1 - alpha))
+
+        elevated_control_points.append((control_weights[-1] * control_points[-1][0]) / control_weights[-1])
+        elevated_control_points.append((control_weights[-1] * control_points[-1][1]) / control_weights[-1])
+        elevated_control_weights.append(control_weights[-1])
+
+        return elevated_control_points, elevated_control_weights
 
 
 
