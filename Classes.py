@@ -201,6 +201,7 @@ class Bezier:
     meanAbsolutePercentageError: float
     control_points: np.ndarray
     curve: dict
+    counter = 0
 
     #loop until some tolerance is met
         #find the ideal locations of control points
@@ -241,7 +242,7 @@ class Bezier:
         x,y = sp.symbols("x,y", real=True)
         t = sp.symbols("t", real=True, positive=True)
 
-        num_control_points = int(len(args[0])/3)
+        num_control_points = int(len(XYList)/3)
 
         for i in range(num_control_points): #sorts args into control points and weights, to generate a rational bezier expression
             weights.append(args[0][i])
@@ -283,7 +284,7 @@ class Bezier:
     #fits a rational Bézier curve to the data set by optimizing control points, control point weights, and
     # elevating the degree of the curve as necessary
     def fitCurve(self, filedata:FileData):
-        multiplier = 1
+        multiplier = 1.10
         tolerance = 0.1
         error = 100
         iterationCounter = 1
@@ -300,15 +301,27 @@ class Bezier:
 
         x_bounds = (min(temp_x) / multiplier, max(temp_x) * multiplier)
         y_bounds = (min(temp_y) / multiplier, max(temp_y) * multiplier)
-        weight_bounds = (0,5)
+
+        x_end_point_bounds_1 = (control_points[0] / multiplier, control_points[0] * multiplier)
+        y_end_point_bounds_1 = (control_points[1] / multiplier, control_points[1] * multiplier)
+
+        x_end_point_bounds_2 = (control_points[-2] / multiplier, control_points[-2] * multiplier)
+        y_end_point_bounds_2 = (control_points[-1] / multiplier, control_points[-1] * multiplier)
+
+
+
+        weight_bounds = (0.0001,10)
         bounds = [weight_bounds, weight_bounds, weight_bounds,
+                  x_end_point_bounds_1, y_end_point_bounds_1,
                   x_bounds, y_bounds,
-                  x_bounds, y_bounds,
-                  x_bounds, y_bounds]
+                  x_end_point_bounds_2, y_end_point_bounds_2]
 
         while True: #iteratively refines the Bézier curve by adding more control points until error falls below tolerance
-            #control_points = scipy.optimize.minimize(fun=self.curveError, x0=control_points, args=filedata.XY, method='Nelder-Mead') #optimizes control points
-            control_points = scipy.optimize.basinhopping(func=self.curveError, x0=control_weights + control_points, minimizer_kwargs={"args":filedata.XY}).x
+            #control_points = scipy.optimize.minimize(fun=self.curveError, x0=control_weights + control_points, args=filedata.XY, bounds=bounds, method='COBYLA').x #optimizes control points
+            #control_points = scipy.optimize.basinhopping(func=self.curveError, x0=control_weights + control_points, minimizer_kwargs={"args":filedata.XY}, niter=250, T=1.1).x
+            #control_points = scipy.optimize.dual_annealing(func=self.curveError, x0=control_weights + control_points, bounds=bounds, args=[filedata.XY], maxiter=300).x
+            #control_points = scipy.optimize.direct(func=self.curveError, bounds=bounds, args=[filedata.XY], maxiter=1000).x
+            control_points = scipy.optimize.differential_evolution(func=self.curveError, bounds=bounds, x0=control_weights+control_points, args=[filedata.XY], maxiter=10000, mutation=(0.75,1.25)).x
             control_weights = control_points[:number_of_control_points]
             control_points = control_points[number_of_control_points:]
 
@@ -317,10 +330,10 @@ class Bezier:
             error = self.curveError(control_points, filedata.XY)
 
             #print(str(sp.latex(self.curve["xCurve"])) + "\n" + str(sp.latex(self.curve["yCurve"])))
-            print(str(error) + "\t" + str(control_points) + "\n")
+            print(str(error) + "\t" + str(control_points) + "\t" + str(control_weights) + "\n")
 
             #checks if conditions are met to exit loop
-            if error < tolerance or iterationCounter > 3:
+            if error < tolerance or iterationCounter > 5:
                 break
             iterationCounter += 1
 
@@ -341,13 +354,24 @@ class Bezier:
             print(str(sp.latex(new_curve_x)) + "\n" + str(sp.latex(new_curve_y)))
 
             bounds.insert(0, weight_bounds)
-            bounds.append(x_bounds)
-            bounds.append(y_bounds)
+            bounds.insert(-2, x_bounds)
+            bounds.insert(-2, y_bounds)
 
             control_points = new_points
             control_weights = new_weights
+            number_of_control_points = len(control_weights)
 
-    #executes degree elevation of a rational Bézier curve, as described in Gerald Fin's Curves and Surfaces for Computer Aided Geometric Design, section 15.4
+            #ensures all control points/weights are within bounds
+            temp = control_weights+control_points
+            for i in range(len(temp)):
+                if temp[i] < bounds[i][0]:
+                    temp[i] = bounds[i][0]
+                elif temp[i] > bounds[i][1]:
+                    temp[i] = bounds[i][1]
+
+
+    #executes degree elevation of a rational Bézier curve, as described in Gerald Fin's Curves and Surfaces for Computer
+    #Aided Geometric Design, section 15.4
     def elevateDegree(self, control_points:list[float], control_weights:list[float]):
         temp = []
         for i in range(int(len(control_points) / 2)):
