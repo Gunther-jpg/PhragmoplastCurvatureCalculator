@@ -66,7 +66,7 @@ def main():
     #out1, out2 = playingWith.rationalBezierExpression(numControlPoints, controlPoints, weights, do_division=True)
     #print(str(sp.latex(out1)) + "\n" + str(str(sp.latex(out2))))
 
-    playingWith.fitCurve(dataList[0])
+    playingWith.fit_curve(dataList[0])
 
     for i in range(len(dataList)):
         dataList[i].findCurvature() #iterates through list, calculating curvature

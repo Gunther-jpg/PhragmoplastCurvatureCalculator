@@ -218,11 +218,30 @@ class Bezier:
     #     return 0
 
     #use Barycentric form of a Rational Bezier curve to force the curve to fit to the 'vertex' of the phragmoplast
-    def initial_curve_guess(self):
+    def initial_curve_guess(self, xy_data):
+        interpolation_points = []
+        x_expression = 0
+        y_expression = 0
+        divisor = 0
+        weight = 1
 
+        t = sp.symbols("t", real=True)  # parameterized value
 
+        #finds the barycentric form of a formula that fits the first, middle, and last xy points in xy data
+        x_points = [xy_data[0][0], xy_data[int(len(xy_data)/2)][0], xy_data[-1][0]]
+        y_points = [xy_data[0][1], xy_data[int(len(xy_data)/2)][1], xy_data[-1][1]]
+        t_values = [0, 0.5, 1]
 
-        return 0
+        for i in range(3):
+            x_expression += (-1)**i * 1 / (t - t_values[i]) * x_points[i]
+            y_expression += (-1)**i * 1 / (t - t_values[i]) * y_points[i]
+            divisor += (-1)**i * 1 / (t - t_values[i])
+            interpolation_points += [x_points[i], y_points[i]]
+
+        x_expression /= divisor
+        y_expression /= divisor
+
+        return interpolation_points, x_expression, y_expression, [1,1,1]
 
     #rational_Bezier_expression
     def rational_Bezier_expression(self, num_control_points:int, control_points:list[tuple], weights:list[float], do_rational=True) -> tuple:
@@ -265,10 +284,10 @@ class Bezier:
 
 
         #creates rational bezier curves x(t) and y(t) as sympy lambda functions for quick evaluation when measuring curve error
-        xCurve, yCurve = self.rational_Bezier_expression( do_rational=True, num_control_points=len(control_points), control_points=control_points, weights=weights)
+        xCurve, yCurve = self.rational_Bezier_expression(do_rational=True, num_control_points=len(control_points), control_points=control_points, weights=weights)
 
-        self.curve["xCurve"] = copy.deepcopy(xCurve)
-        self.curve["yCurve"] = copy.deepcopy(yCurve)
+        self.curve["x_curve"] = copy.deepcopy(xCurve)
+        self.curve["y_curve"] = copy.deepcopy(yCurve)
 
         find_t_from_x = sp.lambdify([t,x], xCurve)
         xCurve, yCurve = sp.lambdify(t, xCurve, modules="numpy"), sp.lambdify(t, yCurve, modules="numpy")
@@ -305,12 +324,9 @@ class Bezier:
         iterationCounter = 1
 
 
-        control_points = [filedata.XY[0][0], filedata.XY[0][1], #formatted as [x1, y1, x2, y2, xn, yn]
-                         filedata.XY[int(len(filedata.XY)/2)][0], filedata.XY[int(len(filedata.XY)/2)][1],
-                         filedata.XY[-1][0], filedata.XY[-1][1]]
+        control_points, self.curve["x_curve"], self.curve["y_curve"], weights = self.initial_curve_guess(filedata.XY)
 
-        control_weights = [1, 1, 1]
-
+        #set bounds for curve fitting, required for some particular minimizers
         number_of_control_points = len(control_weights)
         temp_x, temp_y = zip(*filedata.XY)
 
@@ -322,8 +338,6 @@ class Bezier:
 
         x_end_point_bounds_2 = (control_points[-2] / multiplier, control_points[-2] * multiplier)
         y_end_point_bounds_2 = (control_points[-1] / multiplier, control_points[-1] * multiplier)
-
-
 
         weight_bounds = (0.0001,10)
         bounds = [weight_bounds, weight_bounds, weight_bounds,
