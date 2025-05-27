@@ -219,6 +219,9 @@ class Bezier:
 
     #use Barycentric form of a Rational Bezier curve to force the curve to fit to the 'vertex' of the phragmoplast
     def initial_curve_guess(self):
+
+
+
         return 0
 
     #rational_Bezier_expression
@@ -302,7 +305,7 @@ class Bezier:
         iterationCounter = 1
 
 
-        control_points = [filedata.XY[0][0], filedata.XY[0][1], #formatted as [weight1, x1, y1, weight2, x2, y2, weightn, xn, yn]
+        control_points = [filedata.XY[0][0], filedata.XY[0][1], #formatted as [x1, y1, x2, y2, xn, yn]
                          filedata.XY[int(len(filedata.XY)/2)][0], filedata.XY[int(len(filedata.XY)/2)][1],
                          filedata.XY[-1][0], filedata.XY[-1][1]]
 
