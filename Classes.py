@@ -51,7 +51,7 @@ class Parabola:
     def standardParabola(self, x, a, b, c):
         return a * x ** 2 + b * x + c
 
-    def fitCurve(self, filedata: FileData):
+    def fit_curve(self, filedata: FileData):
         #finds the optimal angle of rotation, theta, about the origin that minimizes the mean squared error associated with
         #the best fitting parabola for the given angle
         self.rotation = scipy.optimize.brute(func=self.findRotatedParabola, ranges=[slice(0, 3.142 * 2, 0.01)], args=filedata, Ns=10)[0]
@@ -92,7 +92,7 @@ class Ellipse:
         self.coefficients = dict()
         self.meanAbsolutePercentageError = -1.0
 
-    def fitCurve(self, filedata:FileData): #XYList should be a list of (x,y) tuples
+    def fit_curve(self, filedata:FileData): #XYList should be a list of (x,y) tuples
         XYList = filedata.XY
         t = sp.symbols("t")
         XYList = [(np.float64(XY[0]), np.float64(XY[1])) for XY in XYList] #ensures all tuples contain numpy float64's
@@ -209,8 +209,20 @@ class Bezier:
     def __init__(self):
         self.meanAbsolutePercentageError = -1.0
         self.curve = dict()
+    
+    # write if necessary for initial_curve_guess
+    # def rationa_bezier_to_barycentric(self):
+    #     return 0
+    # 
+    # def barycentric_to_rational_bezier(self):
+    #     return 0
 
-    def rationalBezierExpression(self, num_control_points:int, control_points:list[tuple], weights:list[float], do_rational=True) -> tuple:
+    #use Barycentric form of a Rational Bezier curve to force the curve to fit to the 'vertex' of the phragmoplast
+    def initial_curve_guess(self):
+        return 0
+
+    #rational_Bezier_expression
+    def rational_Bezier_expression(self, num_control_points:int, control_points:list[tuple], weights:list[float], do_rational=True) -> tuple:
         """ Returns the rational bezier expression for x and y in terms of t as sympy expressions """
 
         xExpression = 0
@@ -233,7 +245,7 @@ class Bezier:
         return xExpression, yExpression
 
     #when called, the last arg must be an instance of FileData
-    def curveError(self, *args):
+    def curve_error(self, *args):
         warnings.filterwarnings("ignore")
 
         XYList = args[-1]
@@ -250,7 +262,7 @@ class Bezier:
 
 
         #creates rational bezier curves x(t) and y(t) as sympy lambda functions for quick evaluation when measuring curve error
-        xCurve, yCurve = self.rationalBezierExpression( do_rational=True, num_control_points=len(control_points), control_points=control_points, weights=weights)
+        xCurve, yCurve = self.rational_Bezier_expression( do_rational=True, num_control_points=len(control_points), control_points=control_points, weights=weights)
 
         self.curve["xCurve"] = copy.deepcopy(xCurve)
         self.curve["yCurve"] = copy.deepcopy(yCurve)
@@ -283,7 +295,7 @@ class Bezier:
 
     #fits a rational Bézier curve to the data set by optimizing control points, control point weights, and
     # elevating the degree of the curve as necessary
-    def fitCurve(self, filedata:FileData):
+    def fit_curve(self, filedata:FileData):
         multiplier = 1.10
         tolerance = 0.1
         error = 100
@@ -317,17 +329,17 @@ class Bezier:
                   x_end_point_bounds_2, y_end_point_bounds_2]
 
         while True: #iteratively refines the Bézier curve by adding more control points until error falls below tolerance
-            #control_points = scipy.optimize.minimize(fun=self.curveError, x0=control_weights + control_points, args=filedata.XY, bounds=bounds, method='COBYLA').x #optimizes control points
-            #control_points = scipy.optimize.basinhopping(func=self.curveError, x0=control_weights + control_points, minimizer_kwargs={"args":filedata.XY}, niter=250, T=1.1).x
-            #control_points = scipy.optimize.dual_annealing(func=self.curveError, x0=control_weights + control_points, bounds=bounds, args=[filedata.XY], maxiter=300).x
-            #control_points = scipy.optimize.direct(func=self.curveError, bounds=bounds, args=[filedata.XY], maxiter=1000).x
-            control_points = scipy.optimize.differential_evolution(func=self.curveError, bounds=bounds, x0=control_weights+control_points, args=[filedata.XY], maxiter=10000, mutation=(0.75,1.25)).x
+            #control_points = scipy.optimize.minimize(fun=self.curve_error, x0=control_weights + control_points, args=filedata.XY, bounds=bounds, method='COBYLA').x #optimizes control points
+            #control_points = scipy.optimize.basinhopping(func=self.curve_error, x0=control_weights + control_points, minimizer_kwargs={"args":filedata.XY}, niter=250, T=1.1).x
+            #control_points = scipy.optimize.dual_annealing(func=self.curve_error, x0=control_weights + control_points, bounds=bounds, args=[filedata.XY], maxiter=300).x
+            #control_points = scipy.optimize.direct(func=self.curve_error, bounds=bounds, args=[filedata.XY], maxiter=1000).x
+            control_points = scipy.optimize.differential_evolution(func=self.curve_error, bounds=bounds, x0=control_weights+control_points, args=[filedata.XY], maxiter=10000, mutation=(0.75,1.25)).x
             control_weights = control_points[:number_of_control_points]
             control_points = control_points[number_of_control_points:]
 
 
             #calculate error
-            error = self.curveError(control_points, filedata.XY)
+            error = self.curve_error(control_points, filedata.XY)
 
             #print(str(sp.latex(self.curve["xCurve"])) + "\n" + str(sp.latex(self.curve["yCurve"])))
             print(str(error) + "\t" + str(control_points) + "\t" + str(control_weights) + "\n")
@@ -341,15 +353,15 @@ class Bezier:
             for i in range(int(len(control_points)/2)):
                 temp.append((control_points[2*i],control_points[2*i + 1]))
 
-            old_curve_x, old_curve_y =  self.rationalBezierExpression(len(temp), temp, control_weights)
+            old_curve_x, old_curve_y =  self.rational_Bezier_expression(len(temp), temp, control_weights)
 
-            new_points, new_weights = self.elevateDegree(control_points, control_weights)
+            new_points, new_weights = self.rational_Bezier_degree_elevation(control_points, control_weights)
 
             temp = []
             for i in range(int(len(new_points)/2)):
                 temp.append((new_points[2*i],new_points[2*i + 1]))
 
-            new_curve_x, new_curve_y = self.rationalBezierExpression(len(temp), temp, new_weights)
+            new_curve_x, new_curve_y = self.rational_Bezier_expression(len(temp), temp, new_weights)
             print(str(sp.latex(old_curve_x)) + "\n" + str(sp.latex(old_curve_y)))
             print(str(sp.latex(new_curve_x)) + "\n" + str(sp.latex(new_curve_y)))
 
@@ -372,7 +384,7 @@ class Bezier:
 
     #executes degree elevation of a rational Bézier curve, as described in Gerald Fin's Curves and Surfaces for Computer
     #Aided Geometric Design, section 15.4
-    def elevateDegree(self, control_points:list[float], control_weights:list[float]):
+    def rational_Bezier_degree_elevation(self, control_points:list[float], control_weights:list[float]):
         temp = []
         for i in range(int(len(control_points) / 2)):
             temp.append((control_points[2 * i], control_points[2 * i + 1]))
@@ -403,7 +415,7 @@ class Bezier:
 
 
 
-    def calculateCurvature(self, XYList:list, filedata:FileData):
+    def calculate_curvature(self, XYList:list, filedata:FileData):
         return 0
 
 
@@ -435,15 +447,15 @@ class FileData:
             else:
                 self.bestFitType = "Parabola"
 
-    def fitCurve(self, curve: Parabola | Ellipse):
-        curve.fitCurve(filedata=self)
+    def fit_curve(self, curve: Parabola | Ellipse):
+        curve.fit_curve(filedata=self)
 
         self.updateBestFitType()
 
     def findCurvature(self):
 
-        self.fitCurve(self.ellipse)
-        self.fitCurve(self.parabola)
+        self.fit_curve(self.ellipse)
+        self.fit_curve(self.parabola)
 
         # calculates the curvature using the curve that has the least mean absolute percentage error
         if self.bestFitType == "Ellipse":
