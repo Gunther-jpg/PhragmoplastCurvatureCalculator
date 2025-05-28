@@ -323,21 +323,42 @@ class Bezier:
             output = sp.sqrt((x_curve_lambda(t)-xCoord)**2 + (y_curve_lambda(t)-yCoord)**2).evalf()
             return output
 
+        def x_curve_differentiable(xi:np.ndarray, *argsi) -> np.ndarray:
+            nonlocal x_curve_lambda
+            output = np.empty(shape=0, dtype=np.float64)
+
+            for i in xi: output.append(x_curve_lambda(i))
+
+            return output
+
+        def y_curve_differentiable(xi: np.ndarray, *argsi) -> np.ndarray:
+            nonlocal y_curve_lambda
+            output = np.empty(shape=0, dtype=np.float64)
+
+            for i in xi: output.append(y_curve_lambda(i))
+
+            return output
+
 
         #appends the true y value and the y value predicted from the Bézier curve to yTrue and yPred, respectively, to calculate error
+        dx_dt = lambda j: derivative(f=x_curve_differentiable, x=[j])[0]
+        dy_dt = lambda j: derivative(f=x_curve_differentiable, x=[j])[0]
         true_y, predicted_y = [], []
-        for XY in XYList:
+
+    for XY in XYList:
             true_y.append(XY[1])
 
             #finds t for the closest point on the curve to the actual XY points measured
-            dx_dt = sp.diff(x_curve, t, evaluate=True)
-            dy_dt = sp.diff(y_curve, t, evaluate=True)
-            predicted_t = sp.solve((x_curve-XY[0]) * dx_dt + (y_curve - XY[1]) * dy_dt,t)
+            # dx_dt = sp.diff(x_curve, t, evaluate=True)
+            # dy_dt = sp.diff(y_curve, t, evaluate=True)
+            # predicted_t = sp.solve((x_curve-XY[0]) * dx_dt + (y_curve - XY[1]) * dy_dt,t)
+            #
+            # if len(predicted_t) >= 1:
+            #     predicted_y.append(y_curve.evalf(subs={t: predicted_t[0]}))
+            # else:
+            #     predicted_y.append(0)
 
-            if len(predicted_t) >= 1:
-                predicted_y.append(y_curve.evalf(subs={t: predicted_t[0]}))
-            else:
-                predicted_y.append(0)
+            
 
 
         error = mean_absolute_percentage_error(y_true=true_y, y_pred=predicted_y) * 100
