@@ -248,17 +248,17 @@ class Bezier:
         y_expression = 0
         divisor = 0
 
-        t = sp.symbols("t", real=True)  # parameterized value
+        j = sp.symbols("j", real=True)  # parameterized value
 
         for i in range(num_interpolation_points):
-            x_expression += (-1)**i * 1 / (t - t_values[i]) * interpolation_points[i][0]
-            y_expression += (-1)**i * 1 / (t - t_values[i]) * interpolation_points[i][1]
-            divisor += (-1)**i * 1 / (t - t_values[i])
+            x_expression += (-1)**i * 1 / (j - t_values[i]) * interpolation_points[i][0]
+            y_expression += (-1)**i * 1 / (j - t_values[i]) * interpolation_points[i][1]
+            divisor += (-1)**i * 1 / (j - t_values[i])
 
         x_expression /= divisor
         y_expression /= divisor
 
-        return x_expression, y_expression
+        return str(x_expression), str(y_expression)
 
     #generates sympy formulas for evaluating a rational Bézier curve
     def rational_Bezier_expression(self, num_control_points:int, control_points:list[tuple], weights:list[float], do_rational=True) -> tuple:
@@ -287,12 +287,13 @@ class Bezier:
     def curve_error(self, *args):
         warnings.filterwarnings("ignore")
 
-        XYList = args[-1]
+        XYList = args[1]["XY"]
+        t_values = args[1]["t_values"]
         control_points, weights = [],[]
-        t_values = []
 
-        x,y = sp.symbols("x,y", real=True)
-        t = sp.symbols("t", real=True, positive=True)
+
+
+        t,x,y = sp.symbols("t x y", real=True, positive=True)
 
         num_control_points = int(len(args[0])/4)
 
@@ -304,20 +305,22 @@ class Bezier:
 
         #creates rational bezier curves x(t) and y(t) as sympy lambda functions for quick evaluation when measuring curve error
         x_curve, y_curve = self.barycentric_expression(num_interpolation_points=len(control_points), interpolation_points=control_points, weights=weights, t_values=t_values)
+        x_curve = sp.sympify(x_curve).subs('j', t)
+        y_curve = sp.sympify(y_curve).subs('j', t)
 
-        self.curve["x_curve"] = copy.deepcopy(x_curve)
-        self.curve["y_curve"] = copy.deepcopy(y_curve)
+        self.curve["x_curve"] = copy.deepcopy(str(x_curve))
+        self.curve["y_curve"] = copy.deepcopy(str(y_curve))
 
-        x_curve, y_curve = sp.lambdify(t, x_curve, modules="numpy"), sp.lambdify(t, y_curve, modules="numpy")
+        x_curve_lambda, y_curve_lambda = sp.lambdify(t, x_curve, modules="numpy"), sp.lambdify(t, y_curve, modules="numpy")
 
 
         def distanceFromBezier(t:float, xCoord:float, yCoord:float) -> float:
-            nonlocal x_curve, y_curve
+            nonlocal x_curve_lambda, y_curve_lambda
 
             if isinstance(t, np.ndarray):
                 t = t[0]
 
-            output = sp.sqrt((x_curve(t)-xCoord)**2 + (y_curve(t)-yCoord)**2).evalf()
+            output = sp.sqrt((x_curve_lambda(t)-xCoord)**2 + (y_curve_lambda(t)-yCoord)**2).evalf()
             return output
 
 
@@ -326,12 +329,16 @@ class Bezier:
         for XY in XYList:
             true_y.append(XY[1])
 
-            #use calc
+            #finds t for the closest point on the curve to the actual XY points measured
+            dx_dt = sp.diff(x_curve, t, evaluate=True)
+            dy_dt = sp.diff(y_curve, t, evaluate=True)
+            predicted_t = sp.solve((x_curve-XY[0]) * dx_dt + (y_curve - XY[1]) * dy_dt,t)
 
-            dx_dt = sp.diff(self.curve["x_curve"], t)
-            dy_dt = sp.diff(self.curve["y_curve"], t)
-            predicted_t = sp.solve((self.curve["x_curve"] - XY[0])*dx_dt + (self.curve["y_curve"] - XY[1])*dy_dt)
-            #predicted_y.append(y_curve(predicted_t))
+            if len(predicted_t) >= 1:
+                predicted_y.append(y_curve.evalf(subs={t: predicted_t[0]}))
+            else:
+                predicted_y.append(0)
+
 
         error = mean_absolute_percentage_error(y_true=true_y, y_pred=predicted_y) * 100
         return error
@@ -345,6 +352,7 @@ class Bezier:
         iterationCounter = 1
 
         control_points, self.curve["x_curve"], self.curve["y_curve"], control_weights, t_values = self.initial_curve_guess(filedata.XY)
+        self.curve["x_curve"], self.curve["y_curve"] = str(self.curve["x_curve"]), str(self.curve["y_curve"])
 
         #set bounds for curve fitting, required for some particular minimizers
         # number_of_control_points = len(control_weights)
@@ -359,16 +367,17 @@ class Bezier:
         # x_end_point_bounds_2 = (control_points[-2] / multiplier, control_points[-2] * multiplier)
         # y_end_point_bounds_2 = (control_points[-1] / multiplier, control_points[-1] * multiplier)
         #
-        # weight_bounds = (0.0001,10)
+        # weight_bounds = (0.000001,10)
+        # t_bounds = (0, 1)
         # bounds = [weight_bounds, weight_bounds, weight_bounds,
         #           x_end_point_bounds_1, y_end_point_bounds_1,
         #           x_bounds, y_bounds,
         #           x_end_point_bounds_2, y_end_point_bounds_2]
 
         while True: #iteratively refines the Bézier curve by adding more control points until error falls below tolerance
-            #control_points = scipy.optimize.minimize(fun=self.curve_error, x0=control_weights + control_points, args=filedata.XY, bounds=bounds, method='COBYLA').x #optimizes control points
-            control_points = scipy.optimize.basinhopping(func=self.curve_error, x0=control_weights + control_points + t_values, minimizer_kwargs={"args":filedata.XY}, niter=100, T=1.1).x
-            #control_points = scipy.optimize.dual_annealing(func=self.curve_error, x0=control_weights + control_points, bounds=bounds, args=[filedata.XY], maxiter=300).x
+            #control_points = scipy.optimize.minimize(fun=self.curve_error, x0=control_weights + control_points + t_values, args=filedata.XY, method='COBYLA').x #optimizes control points
+            control_points = scipy.optimize.basinhopping(func=self.curve_error, x0=control_weights + control_points, minimizer_kwargs={"args":{"XY":filedata.XY, "t_values":t_values}}, niter=10, T=1.1).x
+            #control_points = scipy.optimize.dual_annealing(func=self.curve_error, x0=control_weights + control_points + t_values, bounds=bounds, args=[filedata.XY], maxiter=10).x
             #control_points = scipy.optimize.direct(func=self.curve_error, bounds=bounds, args=[filedata.XY], maxiter=1000).x
             #control_points = scipy.optimize.differential_evolution(func=self.curve_error, bounds=bounds, x0=control_weights+control_points, args=[filedata.XY], maxiter=10000, mutation=(0.75,1.25)).x
             control_weights = control_points[:number_of_control_points]
@@ -402,21 +411,22 @@ class Bezier:
             print(str(sp.latex(old_curve_x)) + "\n" + str(sp.latex(old_curve_y)))
             print(str(sp.latex(new_curve_x)) + "\n" + str(sp.latex(new_curve_y)))
 
-            bounds.insert(0, weight_bounds)
-            bounds.insert(-2, x_bounds)
-            bounds.insert(-2, y_bounds)
-
-            control_points = new_points
-            control_weights = new_weights
-            number_of_control_points = len(control_weights)
-
-            #ensures all control points/weights are within bounds
-            temp = control_weights+control_points
-            for i in range(len(temp)):
-                if temp[i] < bounds[i][0]:
-                    temp[i] = bounds[i][0]
-                elif temp[i] > bounds[i][1]:
-                    temp[i] = bounds[i][1]
+            #
+            # bounds.insert(0, weight_bounds)
+            # bounds.insert(-2, x_bounds)
+            # bounds.insert(-2, y_bounds)
+            #
+            # control_points = new_points
+            # control_weights = new_weights
+            # number_of_control_points = len(control_weights)
+            #
+            # #ensures all control points/weights are within bounds
+            # temp = control_weights+control_points
+            # for i in range(len(temp)):
+            #     if temp[i] < bounds[i][0]:
+            #         temp[i] = bounds[i][0]
+            #     elif temp[i] > bounds[i][1]:
+            #         temp[i] = bounds[i][1]
 
 
     #executes degree elevation of a rational Bézier curve, as described in Gerald Fin's Curves and Surfaces for Computer
