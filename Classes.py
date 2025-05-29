@@ -4,9 +4,9 @@ import copy
 
 import numpy as np
 import scipy.optimize
+import sympy2jax
 from Imports import *
 from Settings import *
-
 
 #stores information associated with parabolas and parabolic fitting
 class Parabola:
@@ -287,21 +287,17 @@ class Bezier:
     def curve_error(self, *args):
         warnings.filterwarnings("ignore")
 
+        control_points, weights = [], []
         XYList = args[1]["XY"]
         t_values = args[1]["t_values"]
-        control_points, weights = [],[]
 
 
+        t = sp.symbols("t", real=True, positive=True) #declare sympy symbols in order to use sympy
 
-        t,x,y = sp.symbols("t x y", real=True, positive=True)
-
-        num_control_points = int(len(args[0])/4)
-
-        for i in range(num_control_points): #sorts args into control points and weights, to generate a rational bezier expression
-            weights.append(args[0][i])
-            control_points.append((args[0][num_control_points + 2*i], args[0][num_control_points + 2*i + 1]))
-            t_values.append(args[0][3 * num_control_points + i])
-
+        #sorts data from args[0] into weights and control points
+        num_control_points = int(len(args[0])/3)
+        weights = args[0][:num_control_points]
+        control_points = list(zip(args[0][num_control_points::2],args[0][num_control_points+1::2]))
 
         #creates rational bezier curves x(t) and y(t) as sympy lambda functions for quick evaluation when measuring curve error
         x_curve, y_curve = self.barycentric_expression(num_interpolation_points=len(control_points), interpolation_points=control_points, weights=weights, t_values=t_values)
@@ -323,30 +319,35 @@ class Bezier:
             output = sp.sqrt((x_curve_lambda(t)-xCoord)**2 + (y_curve_lambda(t)-yCoord)**2).evalf()
             return output
 
-        def x_curve_differentiable(xi:np.ndarray, *argsi) -> np.ndarray:
-            nonlocal x_curve_lambda
-            output = np.empty(shape=0, dtype=np.float64)
-
-            for i in xi: output.append(x_curve_lambda(i))
-
-            return output
-
-        def y_curve_differentiable(xi: np.ndarray, *argsi) -> np.ndarray:
-            nonlocal y_curve_lambda
-            output = np.empty(shape=0, dtype=np.float64)
-
-            for i in xi: output.append(y_curve_lambda(i))
-
-            return output
-
 
         #appends the true y value and the y value predicted from the Bézier curve to yTrue and yPred, respectively, to calculate error
-        dx_dt = lambda j: derivative(f=x_curve_differentiable, x=[j])[0]
-        dy_dt = lambda j: derivative(f=x_curve_differentiable, x=[j])[0]
+        #jaxxed_x_curve = sympy2jax.SymbolicModule(x_curve)
+        dx_dt = jax.grad(fun=x_curve_lambda)
+        dy_dt = jax.grad(fun=y_curve_lambda)
+
+        def dd_dt(t:list[np.float64], *args) -> list:
+            nonlocal x_curve_lambda, y_curve_lambda
+            out = []
+            for i in t:
+                out.append(2*((x_curve_lambda(i)-args[0][0]) * dx_dt(i) + (y_curve_lambda(i) - args[0][1]) * dy_dt(i)))
+            return out
+
         true_y, predicted_y = [], []
 
-    for XY in XYList:
+        # test_x = np.linspace(0.01, 1, 20).tolist()
+        # for i in range(len(test_x)):
+        #     tmp_x = test_x[i]
+        #     test_y = dy_dt(tmp_x)
+        #     print(str(test_x[i]) + '\t' + str(test_y))
+        # result = 0
+
+        a = sp.diff(y_curve, t)
+        print(sp.latex(a))
+
+        for XY in XYList:
             true_y.append(XY[1])
+            result = fsolve(func=dd_dt, x0=0.5, args=XY)
+
 
             #finds t for the closest point on the curve to the actual XY points measured
             # dx_dt = sp.diff(x_curve, t, evaluate=True)
@@ -358,7 +359,6 @@ class Bezier:
             # else:
             #     predicted_y.append(0)
 
-            
 
 
         error = mean_absolute_percentage_error(y_true=true_y, y_pred=predicted_y) * 100
