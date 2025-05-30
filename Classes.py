@@ -428,8 +428,7 @@ class Bezier:
             #saves the current curve into self.curve and prints it in latex form
             x_curve, y_curve = self.barycentric_expression(interpolation_points=list(zip(control_points[::2],control_points[1::2])), weights=control_weights, t_values=t_values)
             self.curve["x_curve"], self.curve["y_curve"] = x_curve.replace('j','t'), y_curve.replace('j','t')
-            x_curve, y_curve = sp.S(x_curve), sp.S(y_curve)
-            print(sp.latex(sp.S(self.curve["x_curve"])) + "\n" + sp.latex(sp.S(self.curve["y_curve"])))
+            #print(sp.latex(sp.S(self.curve["x_curve"])) + "\n" + sp.latex(sp.S(self.curve["y_curve"])))
 
             new_error = self.curve_error(control_weights + control_points, args_curve_error) #new curve
             #checks if conditions are met to exit loop
@@ -437,9 +436,7 @@ class Bezier:
                 break
             iterationCounter += 1
 
-
-        curvature = self.calculate_curvature(x_curve, y_curve)
-        print("curvature:", curvature)
+        curvature = self.calculate_curvature(x_curve, y_curve, t_values)
         return curvature
 
             # temp = []
@@ -508,19 +505,21 @@ class Bezier:
         return elevated_control_points, elevated_control_weights
 
 
-    def calculate_curvature(self, x_curve:str, y_curve:str) -> float:
+    def calculate_curvature(self, x_curve:str, y_curve:str, t_values:list[float]) -> float:
         t = sp.symbols("t", real=True)
         curvature = 0
 
+        x_curve, y_curve = sp.parse_expr(str(x_curve).replace('j','t'),local_dict={'t':t}), sp.parse_expr(str(y_curve).replace('j','t'),local_dict={'t':t})
 
-        x_curve, y_curve = sp.S(x_curve.replace('j','t')), sp.S(y_curve.replace('j','t')) #converting str representations of curves to sympy expression
-        dx_dt, dy_dt = sp.diff(x_curve, t), sp.diff(y_curve, t) #finding the 1st derivatives
-        ddx_dt, ddy_dt = sp.diff(dx_dt, t), sp.diff(dy_dt, t) #finding the 2nd derivaties
+        #x_curve, y_curve = sp.S(copy.deepcopy(x_curve.replace('j','t'))), sp.S(copy.deepcopy(y_curve.replace('j','t'))) #converting str representations of curves to sympy expression
+        dx_dt, dy_dt = x_curve.diff(t), y_curve.diff(t) #finding the 1st derivatives
+        ddx_dt, ddy_dt = sp.diff(dx_dt, t), sp.diff(dy_dt, t) #finding the 2nd derivatives
 
         numerator = abs(dx_dt * ddy_dt - dy_dt * ddx_dt)
-        denominator = (dx_dt**2 + dy_dt**2)**sp.s(3/2)
-
-        curvature = sp.intergrate(numerator / denominator, (t,0,1)) #calculates the curvature across the whole phragmoplast
+        denominator = (dx_dt**2 + dy_dt**2)**sp.S(3/2)
+        integrand = sp.lambdify(t, numerator / denominator,modules="numpy")
+        curvature = quad(integrand, 0, 1, points=t_values)
+        #curvature = sp.integrals.integrals.integrate(numerator / denominator, (t,0,1)) #calculates the curvature across the whole phragmoplast
 
         return curvature
 
@@ -532,42 +531,22 @@ class Bezier:
 class FileData:
     filename: str
     XY: list
-    bestFitType: str
     curvature: float
-    parabola: Parabola
-    ellipse: Ellipse
+    bezier: Bezier
 
 
     def __init__(self, filename="None"):
         self.filename = filename
         self.XY = []
-        self.bestFitType = "Undetermined"
+        #self.bestFitType = "Undetermined"
         self.curvature = 0.0
-        self.parabola = Parabola()
-        self.ellipse = Ellipse()
+        self.bezier = Bezier()
+        #self.parabola = Parabola()
+        #self.ellipse = Ellipse()
 
-    def updateBestFitType(self):  # updates bestFitType based on which fitted curve has the least mean squared error
-        if self.parabola.meanAbsolutePercentageError > 0 and self.ellipse.meanAbsolutePercentageError > 0:
-            if self.parabola.meanAbsolutePercentageError > self.ellipse.meanAbsolutePercentageError:
-                self.bestFitType = "Ellipse"
-            else:
-                self.bestFitType = "Parabola"
-
-    def fit_curve(self, curve: Parabola | Ellipse):
-        curve.fit_curve(filedata=self)
-
-        self.updateBestFitType()
-
-    def findCurvature(self):
-
-        self.fit_curve(self.ellipse)
-        self.fit_curve(self.parabola)
-
-        # calculates the curvature using the curve that has the least mean absolute percentage error
-        if self.bestFitType == "Ellipse":
-            self.curvature = self.ellipse.calculateCurvature(self)
-        elif self.bestFitType == "Parabola":
-            self.curvature = self.parabola.calculateCurvature()
+    def findCurvature(self) -> float:
+        self.curvature = self.bezier.fit_curve(self)
+        return self.curvature
 
     def print(self):
         print("\nfilename: " + self.filename)

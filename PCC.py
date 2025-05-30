@@ -38,11 +38,9 @@ def writeDataToCSV(dataList, outputDirectory):
     #for each file read, adds values to csvData to be written to .csv
     for i in range(len(dataList)):
         rowData = {"Filename" : dataList[i].filename}
-
         rowData["Curvature"] = dataList[i].curvature
-        rowData["Best Fit Type"] = dataList[i].bestFitType
-        rowData["Parabolic MAPE"] = dataList[i].parabola.meanAbsolutePercentageError
-        rowData["Elliptic MAPE"] = dataList[i].ellipse.meanAbsolutePercentageError
+        rowData["x_curve"] = sp.latex(sp.S(dataList[i].bezier.x_curve))
+        rowData["y_curve"] = sp.latex(sp.S(dataList[i].bezier.y_curve))
         csvData.append(copy.deepcopy(rowData))
     
     #writes data to csv
@@ -56,20 +54,9 @@ def writeDataToCSV(dataList, outputDirectory):
 def main():
     dataList = importData(data_path=DATA_DIRECTORY)
 
-    playingWith = Bezier()
-    for i in range(len(dataList)):
-        playingWith.fit_curve(dataList[i])
-
-    return 0
     for i in range(len(dataList)):
         dataList[i].findCurvature() #iterates through list, calculating curvature
-        print(dataList[i].filename)
-        # dataList[i].printXY()
-        dataList[i].parabola.printFormula()
-        #dataList[i].ellipse.printFormula()
-
-    dataList[0].parabola.printRotatedXY()
-
+        print("Finished analyzing: " + dataList[i].filename)
 
     writeDataToCSV(dataList,DATA_DIRECTORY)
     print("Curvatures stored in the .csv in the data Directory")

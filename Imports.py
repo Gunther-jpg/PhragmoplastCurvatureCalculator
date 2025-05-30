@@ -20,7 +20,7 @@ from pickle import GLOBAL
 from dataclasses import dataclass
 
 from scipy.special import binom
-from scipy.integrate import simpson
+from scipy.integrate import quad
 
 
 jax.config.update("jax_traceback_filtering", "off")
