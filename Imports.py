@@ -5,14 +5,12 @@ import warnings
 import copy
 import csv
 import traceback
-import scipy.optimize
+import scipy.optimize as scipy_optimize
 import jax
-import sympy2jax
 
 import sympy as sp
 import pandas as pd
 import numpy as np
-import numdifftools as ndiff
 import matplotlib.pyplot as plt
 import skimage.measure as skim
 import jax.numpy as jnp
@@ -22,9 +20,7 @@ from pickle import GLOBAL
 from dataclasses import dataclass
 
 from scipy.special import binom
-from scipy.optimize import fsolve
 from scipy.integrate import simpson
-from sklearn.metrics import mean_absolute_percentage_error
 
 
-jax.config.update("jax_traceback_filtering", "off")
+#jax.config.update("jax_traceback_filtering", "off")

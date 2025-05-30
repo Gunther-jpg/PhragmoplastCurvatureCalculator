@@ -217,6 +217,17 @@ class Bezier:
     # def barycentric_to_rational_bezier(self):
     #     return 0
 
+    def mean_absolute_log_error(self, y_true:np.ndarray, y_pred:np.ndarray) -> float:
+        if(len(y_true) != len(y_pred)):
+            raise Exception("inputs are of different sizes")
+
+        error = y_true - y_pred
+        error = error**2
+        error = np.sum(error)
+        error /= len(y_true)
+
+        return float(error)
+
     #use Barycentric form of a Rational Bezier curve to force the curve to fit to the 'vertex' of the phragmoplast
     def initial_curve_guess(self, xy_data):
         interpolation_points = []
@@ -243,7 +254,8 @@ class Bezier:
 
         return interpolation_points, x_expression, y_expression, [1,1,1], t_values
 
-    def barycentric_expression(self, num_interpolation_points:int, interpolation_points:list[tuple], weights:list[float], t_values:list[float]) -> tuple:
+    def barycentric_expression(self, interpolation_points:list[tuple], weights:list[float], t_values:list[float]) -> tuple:
+        num_interpolation_points = len(interpolation_points)
         x_expression = 0
         y_expression = 0
         divisor = 0
@@ -285,6 +297,7 @@ class Bezier:
 
     #when called, the last arg must be an instance of FileData
     def curve_error(self, *args):
+        default_t = 0.499999
         warnings.filterwarnings("ignore")
 
         control_points, weights = [], []
@@ -300,17 +313,13 @@ class Bezier:
         control_points = list(zip(args[0][num_control_points::2],args[0][num_control_points+1::2]))
 
         #creates rational bezier curves x(t) and y(t) as sympy lambda functions for quick evaluation when measuring curve error
-        x_curve, y_curve = self.barycentric_expression(num_interpolation_points=len(control_points), interpolation_points=control_points, weights=weights, t_values=t_values)
+        x_curve, y_curve = self.barycentric_expression(interpolation_points=control_points, weights=weights, t_values=t_values)
         x_curve = sp.sympify(x_curve).subs('j', t)
         y_curve = sp.sympify(y_curve).subs('j', t)
 
-        self.curve["x_curve"] = copy.deepcopy(str(x_curve))
-        self.curve["y_curve"] = copy.deepcopy(str(y_curve))
-
         x_curve_lambda, y_curve_lambda = sp.lambdify(t, x_curve, modules="numpy"), sp.lambdify(t, y_curve, modules="numpy")
 
-
-        def distanceFromBezier(t:float, xCoord:float, yCoord:float) -> float:
+        def distance_from_bezier(t:float, xCoord:float, yCoord:float) -> float:
             nonlocal x_curve_lambda, y_curve_lambda
 
             if isinstance(t, np.ndarray):
@@ -321,7 +330,7 @@ class Bezier:
 
 
         #appends the true y value and the y value predicted from the Bézier curve to yTrue and yPred, respectively, to calculate error
-        #jaxxed_x_curve = sympy2jax.SymbolicModule(x_curve)
+        jaxxed_x_curve = sympy2jax.SymbolicModule(x_curve)
         dx_dt = jax.grad(fun=x_curve_lambda)
         dy_dt = jax.grad(fun=y_curve_lambda)
 
@@ -329,25 +338,19 @@ class Bezier:
             nonlocal x_curve_lambda, y_curve_lambda
             out = []
             for i in t:
-                out.append(2*((x_curve_lambda(i)-args[0][0]) * dx_dt(i) + (y_curve_lambda(i) - args[0][1]) * dy_dt(i)))
+                out.append(((x_curve_lambda(i)-args[0]) * dx_dt(i) + (y_curve_lambda(i) - args[1]) * dy_dt(i)))
+            if type(out) == type(None): out = 0
             return out
 
-        true_y, predicted_y = [], []
-
-        # test_x = np.linspace(0.01, 1, 20).tolist()
-        # for i in range(len(test_x)):
-        #     tmp_x = test_x[i]
-        #     test_y = dy_dt(tmp_x)
-        #     print(str(test_x[i]) + '\t' + str(test_y))
-        # result = 0
-
-        a = sp.diff(y_curve, t)
-        print(sp.latex(a))
-
+        true_y, predicted_y = np.empty(0), np.empty(0)
         for XY in XYList:
-            true_y.append(XY[1])
-            result = fsolve(func=dd_dt, x0=0.5, args=XY)
+            true_y = np.append(true_y, XY[1])
+            closest_t = scipy_optimize.fsolve(func=dd_dt, x0=default_t, args=XY)
 
+            if closest_t == default_t:
+                closest_t = scipy_optimize.fsolve(func=dd_dt, x0=default_t + 0.1, args=XY)
+
+            predicted_y = np.append(predicted_y, y_curve_lambda(closest_t[0]))
 
             #finds t for the closest point on the curve to the actual XY points measured
             # dx_dt = sp.diff(x_curve, t, evaluate=True)
@@ -361,7 +364,7 @@ class Bezier:
 
 
 
-        error = mean_absolute_percentage_error(y_true=true_y, y_pred=predicted_y) * 100
+        error = self.mean_absolute_log_error(y_true=true_y, y_pred=predicted_y)
         return error
 
     #fits a rational Bézier curve to the data set by optimizing control points, control point weights, and
@@ -374,42 +377,31 @@ class Bezier:
 
         control_points, self.curve["x_curve"], self.curve["y_curve"], control_weights, t_values = self.initial_curve_guess(filedata.XY)
         self.curve["x_curve"], self.curve["y_curve"] = str(self.curve["x_curve"]), str(self.curve["y_curve"])
+        num_control_points = int(len(control_points)/2)
+        #[1.0230024388365546, 1.0159040182658896, 1.012562825921112, 84.45364557311515, 143.28439593337595, 143.08824091018283, 90.0287592439941, 196.40741300541654, 138.54800121361993]
+        old_error = self.curve_error(control_weights + control_points, {"XY":filedata.XY, "t_values":t_values})
 
-        #set bounds for curve fitting, required for some particular minimizers
-        # number_of_control_points = len(control_weights)
-        # temp_x, temp_y = zip(*filedata.XY)
-        #
-        # x_bounds = (min(temp_x) / multiplier, max(temp_x) * multiplier)
-        # y_bounds = (min(temp_y) / multiplier, max(temp_y) * multiplier)
-        #
-        # x_end_point_bounds_1 = (control_points[0] / multiplier, control_points[0] * multiplier)
-        # y_end_point_bounds_1 = (control_points[1] / multiplier, control_points[1] * multiplier)
-        #
-        # x_end_point_bounds_2 = (control_points[-2] / multiplier, control_points[-2] * multiplier)
-        # y_end_point_bounds_2 = (control_points[-1] / multiplier, control_points[-1] * multiplier)
-        #
-        # weight_bounds = (0.000001,10)
-        # t_bounds = (0, 1)
-        # bounds = [weight_bounds, weight_bounds, weight_bounds,
-        #           x_end_point_bounds_1, y_end_point_bounds_1,
-        #           x_bounds, y_bounds,
-        #           x_end_point_bounds_2, y_end_point_bounds_2]
+        weight_bounds = (0, 5)
+        coord_bound = (1, None)
+        bounds = [weight_bounds, weight_bounds, weight_bounds, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound]
+        x0 = control_weights + control_points
 
         while True: #iteratively refines the Bézier curve by adding more control points until error falls below tolerance
-            #control_points = scipy.optimize.minimize(fun=self.curve_error, x0=control_weights + control_points + t_values, args=filedata.XY, method='COBYLA').x #optimizes control points
-            control_points = scipy.optimize.basinhopping(func=self.curve_error, x0=control_weights + control_points, minimizer_kwargs={"args":{"XY":filedata.XY, "t_values":t_values}}, niter=10, T=1.1).x
-            #control_points = scipy.optimize.dual_annealing(func=self.curve_error, x0=control_weights + control_points + t_values, bounds=bounds, args=[filedata.XY], maxiter=10).x
-            #control_points = scipy.optimize.direct(func=self.curve_error, bounds=bounds, args=[filedata.XY], maxiter=1000).x
-            #control_points = scipy.optimize.differential_evolution(func=self.curve_error, bounds=bounds, x0=control_weights+control_points, args=[filedata.XY], maxiter=10000, mutation=(0.75,1.25)).x
-            control_weights = control_points[:number_of_control_points]
-            control_points = control_points[number_of_control_points:]
+            #control_points = scipy.optimize.basinhopping(func=self.curve_error, x0=control_weights + control_points, minimizer_kwargs={"args":{"XY":filedata.XY, "t_values":t_values}}, niter=10, T=1.1).x.tolist()
+            control_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=x0, bounds=bounds, maxfun=100, args={"XY":filedata.XY, "t_values":t_values}).x.tolist()
+            #separates the control weights and control points from scipy optimization
+            control_weights = control_points[:num_control_points]
+            control_points = control_points[num_control_points:]
+
+            #saves the current curve into self.curve and prints it in latex form
+            x_curve, y_curve = self.barycentric_expression(interpolation_points=list(zip(control_points[::2],control_points[1::2])), weights=control_weights, t_values=t_values)
+            x_curve, y_curve = x_curve.replace('j','t'), y_curve.replace('j','t')
+            self.curve["x_curve"], self.curve["y_curve"] = x_curve, y_curve
+            x_curve, y_curve = sp.S(x_curve), sp.S(y_curve)
+            print(sp.latex(x_curve) + "\n" + sp.latex(y_curve))
 
 
-            #calculate error
-            error = self.curve_error(control_points, filedata.XY)
-
-            #print(str(sp.latex(self.curve["xCurve"])) + "\n" + str(sp.latex(self.curve["yCurve"])))
-            print(str(error) + "\t" + str(control_points) + "\t" + str(control_weights) + "\n")
+            new_error = self.curve_error(control_weights + control_points, {"XY":filedata.XY, "t_values":t_values}) #new curve
 
             #checks if conditions are met to exit loop
             if error < tolerance or iterationCounter > 5:
