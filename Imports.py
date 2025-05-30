@@ -23,4 +23,4 @@ from scipy.special import binom
 from scipy.integrate import simpson
 
 
-#jax.config.update("jax_traceback_filtering", "off")
+jax.config.update("jax_traceback_filtering", "off")

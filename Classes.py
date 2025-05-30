@@ -216,8 +216,36 @@ class Bezier:
     # 
     # def barycentric_to_rational_bezier(self):
     #     return 0
+    def normalized_absolute_residue_sum(self, y_true=np.ndarray, y_pred=np.ndarray) -> float:
+        error = abs(y_true - y_pred)
+        error = np.sum(error)
+        error = error / np.sum(y_true)
+        return error
+
+    def normalized_residue_sum(self, y_true=np.ndarray, y_pred=np.ndarray) -> float:
+        error = y_true - y_pred
+        error = np.sum(error)
+        error = error / np.sum(y_true)
+        return error
+
+    def mean_absolute_percent_error(self, y_true:np.ndarray, y_pred:np.ndarray) -> float:
+
+        error = (y_true - y_pred) / y_true
+        error = np.sum(abs(error))
+        error /= len(y_true)
+
+        return float(error * 100)
 
     def mean_absolute_log_error(self, y_true:np.ndarray, y_pred:np.ndarray) -> float:
+
+        error = y_true / y_pred
+        error = np.log10(error)
+        error = np.sum(abs(error))
+        error /= len(y_true)
+
+        return float(error)
+
+    def mean_squared_error(self, y_true:np.ndarray, y_pred:np.ndarray) -> float:
         if(len(y_true) != len(y_pred)):
             raise Exception("inputs are of different sizes")
 
@@ -235,6 +263,7 @@ class Bezier:
         y_expression = 0
         divisor = 0
         weight = 1
+        sig = 1
 
         t = sp.symbols("t", real=True)  # parameterized value
 
@@ -244,10 +273,11 @@ class Bezier:
         t_values = [0, 0.5, 1]
 
         for i in range(3):
-            x_expression += (-1)**i * 1 / (t - t_values[i]) * x_points[i]
-            y_expression += (-1)**i * 1 / (t - t_values[i]) * y_points[i]
-            divisor += (-1)**i * 1 / (t - t_values[i])
+            x_expression += sig * 1 / (t - t_values[i]) * x_points[i]
+            y_expression += sig * 1 / (t - t_values[i]) * y_points[i]
+            divisor += sig * 1 / (t - t_values[i])
             interpolation_points += [x_points[i], y_points[i]]
+            sig = -sig
 
         x_expression /= divisor
         y_expression /= divisor
@@ -259,13 +289,15 @@ class Bezier:
         x_expression = 0
         y_expression = 0
         divisor = 0
+        sig = 1
 
         j = sp.symbols("j", real=True)  # parameterized value
 
         for i in range(num_interpolation_points):
-            x_expression += (-1)**i * 1 / (j - t_values[i]) * interpolation_points[i][0]
-            y_expression += (-1)**i * 1 / (j - t_values[i]) * interpolation_points[i][1]
-            divisor += (-1)**i * 1 / (j - t_values[i])
+            x_expression += sig * 1 / (j - t_values[i]) * interpolation_points[i][0]
+            y_expression += sig * 1 / (j - t_values[i]) * interpolation_points[i][1]
+            divisor += sig * 1 / (j - t_values[i])
+            sig = -sig
 
         x_expression /= divisor
         y_expression /= divisor
@@ -299,13 +331,12 @@ class Bezier:
     def curve_error(self, *args):
         default_t = 0.499999
         warnings.filterwarnings("ignore")
-
         control_points, weights = [], []
         XYList = args[1]["XY"]
         t_values = args[1]["t_values"]
+        error_measure_method = args[1]["error_measure_method"]
+        t = sp.symbols("t", real=True, positive=True)  # declare sympy symbols in order to use sympy
 
-
-        t = sp.symbols("t", real=True, positive=True) #declare sympy symbols in order to use sympy
 
         #sorts data from args[0] into weights and control points
         num_control_points = int(len(args[0])/3)
@@ -317,6 +348,7 @@ class Bezier:
         x_curve = sp.sympify(x_curve).subs('j', t)
         y_curve = sp.sympify(y_curve).subs('j', t)
 
+        #lambdify expressions for quick evaluation
         x_curve_lambda, y_curve_lambda = sp.lambdify(t, x_curve, modules="numpy"), sp.lambdify(t, y_curve, modules="numpy")
 
         def distance_from_bezier(t:float, xCoord:float, yCoord:float) -> float:
@@ -352,19 +384,14 @@ class Bezier:
 
             predicted_y = np.append(predicted_y, y_curve_lambda(closest_t[0]))
 
-            #finds t for the closest point on the curve to the actual XY points measured
-            # dx_dt = sp.diff(x_curve, t, evaluate=True)
-            # dy_dt = sp.diff(y_curve, t, evaluate=True)
-            # predicted_t = sp.solve((x_curve-XY[0]) * dx_dt + (y_curve - XY[1]) * dy_dt,t)
-            #
-            # if len(predicted_t) >= 1:
-            #     predicted_y.append(y_curve.evalf(subs={t: predicted_t[0]}))
-            # else:
-            #     predicted_y.append(0)
+        #selects which error measure method to use based on error_measure_method
+        if error_measure_method == "mean_squared_error": error = self.mean_squared_error(y_true=true_y, y_pred=predicted_y)
+        elif error_measure_method == "mean_absolute_log_error":error = self.mean_absolute_log_error(y_true=true_y, y_pred=predicted_y)
+        elif error_measure_method == "mean_absolute_percent_error": error = self.mean_absolute_percent_error(y_true=true_y, y_pred=predicted_y)
+        elif error_measure_method == "normalized_residue_sum": error = self.normalized_residue_sum(y_true=true_y, y_pred=predicted_y)
+        elif error_measure_method == "normalized_absolute_residue_sum": error = self.normalized_absolute_residue_sum(y_true=true_y, y_pred=predicted_y)
+        else: raise Exception(f"Unknown error measure method: {error_measure_method}")
 
-
-
-        error = self.mean_absolute_log_error(y_true=true_y, y_pred=predicted_y)
         return error
 
     #fits a rational Bézier curve to the data set by optimizing control points, control point weights, and
@@ -374,12 +401,17 @@ class Bezier:
         tolerance = 0.1
         error = 100
         iterationCounter = 1
+        max_iterations = 1
+        options = {"maxiter":10}
+        curvature = 0
 
         control_points, self.curve["x_curve"], self.curve["y_curve"], control_weights, t_values = self.initial_curve_guess(filedata.XY)
         self.curve["x_curve"], self.curve["y_curve"] = str(self.curve["x_curve"]), str(self.curve["y_curve"])
         num_control_points = int(len(control_points)/2)
-        #[1.0230024388365546, 1.0159040182658896, 1.012562825921112, 84.45364557311515, 143.28439593337595, 143.08824091018283, 90.0287592439941, 196.40741300541654, 138.54800121361993]
-        old_error = self.curve_error(control_weights + control_points, {"XY":filedata.XY, "t_values":t_values})
+        args_curve_error = {"XY": filedata.XY, "t_values": t_values, "error_measure_method": "normalized_absolute_residue_sum"}
+        #[1.0241109587268298, 1.015008130957026, 0.9935477564067847, 83.99306216677172, 141.34959090917687, 144.75781320598577, 90.23454894495538, 196.2262497719678, 139.2538262423015]
+
+        old_error = self.curve_error(control_weights + control_points, args_curve_error)
 
         weight_bounds = (0, 5)
         coord_bound = (1, None)
@@ -388,41 +420,43 @@ class Bezier:
 
         while True: #iteratively refines the Bézier curve by adding more control points until error falls below tolerance
             #control_points = scipy.optimize.basinhopping(func=self.curve_error, x0=control_weights + control_points, minimizer_kwargs={"args":{"XY":filedata.XY, "t_values":t_values}}, niter=10, T=1.1).x.tolist()
-            control_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=x0, bounds=bounds, maxfun=100, args={"XY":filedata.XY, "t_values":t_values}).x.tolist()
+            control_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=x0, bounds=bounds, options=options, args=args_curve_error).x.tolist()
             #separates the control weights and control points from scipy optimization
             control_weights = control_points[:num_control_points]
             control_points = control_points[num_control_points:]
 
             #saves the current curve into self.curve and prints it in latex form
             x_curve, y_curve = self.barycentric_expression(interpolation_points=list(zip(control_points[::2],control_points[1::2])), weights=control_weights, t_values=t_values)
-            x_curve, y_curve = x_curve.replace('j','t'), y_curve.replace('j','t')
-            self.curve["x_curve"], self.curve["y_curve"] = x_curve, y_curve
+            self.curve["x_curve"], self.curve["y_curve"] = x_curve.replace('j','t'), y_curve.replace('j','t')
             x_curve, y_curve = sp.S(x_curve), sp.S(y_curve)
-            print(sp.latex(x_curve) + "\n" + sp.latex(y_curve))
+            print(sp.latex(sp.S(self.curve["x_curve"])) + "\n" + sp.latex(sp.S(self.curve["y_curve"])))
 
-
-            new_error = self.curve_error(control_weights + control_points, {"XY":filedata.XY, "t_values":t_values}) #new curve
-
+            new_error = self.curve_error(control_weights + control_points, args_curve_error) #new curve
             #checks if conditions are met to exit loop
-            if error < tolerance or iterationCounter > 5:
+            if error < tolerance or iterationCounter >= max_iterations:
                 break
             iterationCounter += 1
 
-            temp = []
-            for i in range(int(len(control_points)/2)):
-                temp.append((control_points[2*i],control_points[2*i + 1]))
 
-            old_curve_x, old_curve_y =  self.rational_Bezier_expression(len(temp), temp, control_weights)
+        curvature = self.calculate_curvature(x_curve, y_curve)
+        print("curvature:", curvature)
+        return curvature
 
-            new_points, new_weights = self.rational_Bezier_degree_elevation(control_points, control_weights)
-
-            temp = []
-            for i in range(int(len(new_points)/2)):
-                temp.append((new_points[2*i],new_points[2*i + 1]))
-
-            new_curve_x, new_curve_y = self.rational_Bezier_expression(len(temp), temp, new_weights)
-            print(str(sp.latex(old_curve_x)) + "\n" + str(sp.latex(old_curve_y)))
-            print(str(sp.latex(new_curve_x)) + "\n" + str(sp.latex(new_curve_y)))
+            # temp = []
+            # for i in range(int(len(control_points)/2)):
+            #     temp.append((control_points[2*i],control_points[2*i + 1]))
+            #
+            # old_curve_x, old_curve_y =  self.rational_Bezier_expression(len(temp), temp, control_weights)
+            #
+            # new_points, new_weights = self.rational_Bezier_degree_elevation(control_points, control_weights)
+            #
+            # temp = []
+            # for i in range(int(len(new_points)/2)):
+            #     temp.append((new_points[2*i],new_points[2*i + 1]))
+            #
+            # new_curve_x, new_curve_y = self.rational_Bezier_expression(len(temp), temp, new_weights)
+            # print(str(sp.latex(old_curve_x)) + "\n" + str(sp.latex(old_curve_y)))
+            # print(str(sp.latex(new_curve_x)) + "\n" + str(sp.latex(new_curve_y)))
 
             #
             # bounds.insert(0, weight_bounds)
@@ -474,9 +508,21 @@ class Bezier:
         return elevated_control_points, elevated_control_weights
 
 
+    def calculate_curvature(self, x_curve:str, y_curve:str) -> float:
+        t = sp.symbols("t", real=True)
+        curvature = 0
 
-    def calculate_curvature(self, XYList:list, filedata:FileData):
-        return 0
+
+        x_curve, y_curve = sp.S(x_curve.replace('j','t')), sp.S(y_curve.replace('j','t')) #converting str representations of curves to sympy expression
+        dx_dt, dy_dt = sp.diff(x_curve, t), sp.diff(y_curve, t) #finding the 1st derivatives
+        ddx_dt, ddy_dt = sp.diff(dx_dt, t), sp.diff(dy_dt, t) #finding the 2nd derivaties
+
+        numerator = abs(dx_dt * ddy_dt - dy_dt * ddx_dt)
+        denominator = (dx_dt**2 + dy_dt**2)**sp.s(3/2)
+
+        curvature = sp.intergrate(numerator / denominator, (t,0,1)) #calculates the curvature across the whole phragmoplast
+
+        return curvature
 
 
 

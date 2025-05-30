@@ -57,17 +57,10 @@ def main():
     dataList = importData(data_path=DATA_DIRECTORY)
 
     playingWith = Bezier()
+    for i in range(len(dataList)):
+        playingWith.fit_curve(dataList[i])
 
-    # controlPoints = [(83,140), (94,117), (117,97), (148,90), (173,97), (191,118), (199,140)]
-    # numControlPoints = 7
-    # weights = [1, 1, 1, 1, 1, 1, 1]
-
-
-    #out1, out2 = playingWith.rationalBezierExpression(numControlPoints, controlPoints, weights, do_division=True)
-    #print(str(sp.latex(out1)) + "\n" + str(str(sp.latex(out2))))
-
-    playingWith.fit_curve(dataList[0])
-
+    return 0
     for i in range(len(dataList)):
         dataList[i].findCurvature() #iterates through list, calculating curvature
         print(dataList[i].filename)
