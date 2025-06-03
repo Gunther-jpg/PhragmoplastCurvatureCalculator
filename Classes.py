@@ -6,199 +6,10 @@ import numpy as np
 import scipy.optimize
 import sympy2jax
 from Imports import *
-from Settings import *
-
-#stores information associated with parabolas and parabolic fitting
-class Parabola:
-    coefficients: dict
-    meanAbsolutePercentageError: float
-    rotation: float
-    rotatedXY: list
-    formula = "a*x**2 + b*x + c"
-    curvatureFormula = "(2*a*x + b)*Abs(a)/(a*sqrt(4*a**2 * x**2 + 4*a*b*x + b**2 + 1))" # curvature of a parabola in standard form
-                                                                                         # at some point P = (m,n) is |2a|/(1+(2ax+b)^2)^(3/2)
-    def __init__(self):
-        self.coefficients = {}
-        self.meanAbsolutePercentageError = -1.0
-        self.rotation = 0.0
-        self.rotatedXY = []
-
-    #For a given rotation of XY data points, finds the coefficients of the parabola that fits best
-    def findRotatedParabola(self, theta:float, filedata) -> float:
-        predicted_values = []
-        rotatedXY = []
-
-        for i in range(len(filedata.XY)):  # rotates the xy data by a given theta, in radians, probably
-            rotatedXY.append(rotate(ORIGIN, filedata.XY[i], theta))
-
-        xData = [XY[0] for XY in rotatedXY]
-        yData = [XY[1] for XY in rotatedXY]
-
-        results = scipy.optimize.curve_fit(f=self.standardParabola, xdata=xData, ydata=yData, p0=[1, 1, 1]) #p0 = a, b, c from ax^2+bx+c
-        results = results[0] #selects just coefficients
-
-        for x in xData:
-            predicted_values.append(self.standardParabola(x, results[0], results[1], results[2]))
-
-        # calculates the mean squared error
-        self.meanAbsolutePercentageError = mean_absolute_percentage_error(y_true=yData, y_pred=predicted_values) * 100 #converts to a percentage
-
-        # updates coefficients
-        self.coefficients = {'a':results[0], 'b':results[1], 'c':results[2]}
-
-        return self.meanAbsolutePercentageError
-
-    def standardParabola(self, x, a, b, c):
-        return a * x ** 2 + b * x + c
-
-    def fit_curve(self, filedata: FileData):
-        #finds the optimal angle of rotation, theta, about the origin that minimizes the mean squared error associated with
-        #the best fitting parabola for the given angle
-        self.rotation = scipy.optimize.brute(func=self.findRotatedParabola, ranges=[slice(0, 3.142 * 2, 0.01)], args=filedata, Ns=10)[0]
-
-        for XY in filedata.XY:
-            self.rotatedXY.append(rotate(ORIGIN, XY, self.rotation))
-
-    def printFormula(self):
-        print("\n" + sp.latex(sp.sympify(self.formula).subs({'a':self.coefficients['a'], 'b':self.coefficients['b'], 'c':self.coefficients['c']})))
-
-    def calculateCurvature(self):
-        # curvature of a parabola at some point P = (m,n) is |2a|/(1+(2ax+b)^2)^(3/2), the total phragmoplast curvature
-        # is the integral of the curvature, |a|*(2*a*x+b)/(a*sqrt(4*(a*x)^2 + 4*a*b*x + b^2 + 1)), over the region the
-        # phragmoplast occupies
-
-        a,b,x = sp.symbols("a,b,x")
-
-        X0Curvature = sp.sympify(self.curvatureFormula).subs({a:self.coefficients['a'], b:self.coefficients['b'], x:self.rotatedXY[0][0]})
-        XnCurvature = sp.sympify(self.curvatureFormula).subs({a:self.coefficients['a'], b:self.coefficients['b'], x:self.rotatedXY[-1][0]})
-
-        return abs((X0Curvature - XnCurvature).evalf())  # total curvature from X0 to XN - the definite integral of curvature
-
-    def printRotatedXY(self):
-        for XY in self.rotatedXY:
-            print(str(XY[0]) + "," + str(XY[1]))
-
-#stores information associated with ellipses and elliptic fitting
-class Ellipse:
-    coefficients: dict
-    meanAbsolutePercentageError: float
-    model = None
-    curvatureFormula = "Abs(a*b)/(a**2*cos(t)**2 + b**2*sin(t)**2)**(3/2)"
-    formula = ["xc + a*cos(theta)*cos(t) - b*sin(theta)*sin(t)",
-               "yc + a*sin(theta)*cos(t) + b*cos(theta)*sin(t)"] #from scikit-image's ellipse model
-
-
-    def __init__(self):
-        self.coefficients = dict()
-        self.meanAbsolutePercentageError = -1.0
-
-    def fit_curve(self, filedata:FileData): #XYList should be a list of (x,y) tuples
-        XYList = filedata.XY
-        t = sp.symbols("t")
-        XYList = [(np.float64(XY[0]), np.float64(XY[1])) for XY in XYList] #ensures all tuples contain numpy float64's
-        XYList = np.array(XYList) #makes XYList usable with scikit-image's EllipseModel
-
-
-        self.model = skim.EllipseModel
-        self.model.estimate(self.model, XYList) #fits the model
-        xc, yc, a, b, theta = self.model.params #gets the parameters from the EllipseModel that minimizes mean squared error
-                                                #Note: theta represents the angle the ellipse is rotated about it's center,
-                                                #as opposed to the meaning of theta used for fitting a parabola
-
-        self.coefficients = {'xc': xc, 'yc': yc, 'a': a, 'b': b, 'theta': theta}
-
-        yTrue = [XY[0] for XY in XYList]
-        yPred = []
-
-        X = sp.sympify(self.formula[0]).subs(self.coefficients)
-        for XY in XYList:
-            T = self.findTClosestToPointOnEllipse(XY)
-            yPred.append(X.subs({t:T}).evalf())
-
-        self.meanAbsolutePercentageError = mean_absolute_percentage_error(y_true = yTrue, y_pred = yPred) * 100
-
-    def findCurvatureFormula(self):
-        if self.formula != ["xc + a*cos(theta)*cos(t) - b*sin(theta)*sin(t)","yc + a*sin(theta)*cos(t) + b*cos(theta)*sin(t)"]:
-            # Finds the general function for curvature for an ellipse of this particular form and prints to the console in latex
-            t = sp.symbols("t")
-            dX = sp.diff(sp.sympify(self.formula[0]), t)
-            dY = sp.diff(sp.sympify(self.formula[1]), t)
-
-            ddX = sp.diff(dX, t)
-            ddY = sp.diff(dY, t)
-
-            self.curvatureFormula = (dX * ddY - dY * ddX) / (dX ** 2 + dY ** 2) ** (sp.S(3) / 2)
-            self.curvatureFormula = sp.sstr(sp.trigsimp(sp.factor(sp.S(self.curvatureFormula))))  # does some simplification to try to speed up computation
-
-    def curvatureFunction(self, t):
-        output = sp.sympify(self.curvatureFormula).subs(self.coefficients).subs('t',t)
-        return output.evalf()
-
-    def findTClosestToPointOnEllipse(self, pointOfInterest: tuple) -> float:
-        t = sp.symbols("t")
-        
-        # Set up the parameterized equations of the ellipse being used
-        X = sp.sympify(self.formula[0])
-        Y = sp.sympify(self.formula[1])
-
-        # Substitute the known values into the equations
-        X = X.subs(self.coefficients)
-        Y = Y.subs(self.coefficients)
-
-        # makes X & Y lambda functions, for quick evaluation
-        X = sp.lambdify(t, X, modules='numpy')
-        Y = sp.lambdify(t, Y, modules='numpy')
-
-        distanceFromPointToEllipse = lambda T, x, y: ((X(T) - x) ** 2 + (Y(T) - y) ** 2)
-
-        x0 = np.array([0], dtype=np.float64)
-        output = scipy.optimize.minimize(fun=distanceFromPointToEllipse, x0=x0, method='nelder-mead',args=(pointOfInterest[0],pointOfInterest[1]))
-
-        return output.x[0]
-
-    def calculateCurvature(self, filedata:FileData):
-        curvature = 0.0
-
-        xc, yc, a, b, theta, m, n = sp.symbols('xc, yc, a, b, theta, m, n', real=True)  # Declare sympy symbols
-
-        self.findCurvatureFormula()
-
-        #finds the limits of integration m,n for the curvature function
-        lowerBound = self.findTClosestToPointOnEllipse(filedata.XY[0])
-        upperBound = self.findTClosestToPointOnEllipse(filedata.XY[-1])
-        
-        #update bounds to ensure 0<=t<=2pi, required for Simpson's Rule
-        if lowerBound < 0:
-            lowerBound = lowerBound + (sp.Abs(sp.floor(lowerBound/(2*sp.pi))) * 2*sp.pi)
-        elif lowerBound > 2*sp.pi:
-            lowerBound = lowerBound - ((sp.floor(lowerBound/(2*sp.pi))) * 2*sp.pi)
-
-
-        if upperBound < 0:
-            upperBound = upperBound + (sp.Abs(sp.floor(upperBound/(2*sp.pi))) * 2*sp.pi)
-        elif lowerBound > 2 * sp.pi:
-            lowerBound = upperBound - (sp.floor(upperBound/(2*sp.pi)) * 2*sp.pi)
-        
-        #ensures upperBound is greater than lowerBound
-        if lowerBound > upperBound:
-            lowerBound, upperBound = upperBound, lowerBound
-        
-        
-        # Implementation of Simpson's Rule
-        numberOfSubIntervals = 100  # arbitrary number, I really rather not implement this in a way that loops until a particular tolerance is met
-        stepLength = sp.sympify(sp.S(upperBound - lowerBound)/numberOfSubIntervals)
-        xVals = [x for x in np.linspace(start=lowerBound, stop=upperBound, num=numberOfSubIntervals)]
-        yVals = [self.curvatureFunction(x) for x in xVals]
-
-        curvature = simpson(y=yVals, x=xVals)
-        return curvature
-
-    def printFormula(self):
-        print("\n" + "(" + sp.latex(sp.sympify(self.formula[0]).subs(self.coefficients)) + ", " + sp.latex(sp.sympify(self.formula[1]).subs(self.coefficients)) + ")")
 
 #stores information associated with Bézier and Bézier curve fitting
 class Bezier:
-    meanAbsolutePercentageError: float
+    error_info: dict
     control_points: np.ndarray
     curve: dict
     counter = 0
@@ -207,7 +18,7 @@ class Bezier:
         #find the ideal locations of control points
 
     def __init__(self):
-        self.meanAbsolutePercentageError = -1.0
+        self.error_info = dict()
         self.curve = dict()
     
     # write if necessary for initial_curve_guess
@@ -256,7 +67,7 @@ class Bezier:
 
         return float(error)
 
-    #use Barycentric form of a Rational Bezier curve to force the curve to fit to the 'vertex' of the phragmoplast
+    #use Barycentric form of a Rational Beziér curve to force the curve to fit to the 'vertex' of the phragmoplast
     def initial_curve_guess(self, xy_data):
         interpolation_points = []
         x_expression = 0
@@ -362,9 +173,11 @@ class Bezier:
 
 
         #appends the true y value and the y value predicted from the Bézier curve to yTrue and yPred, respectively, to calculate error
-        jaxxed_x_curve = sympy2jax.SymbolicModule(x_curve)
-        dx_dt = jax.grad(fun=x_curve_lambda)
-        dy_dt = jax.grad(fun=y_curve_lambda)
+        #jaxxed_x_curve = sympy2jax.SymbolicModule(x_curve)
+        #dx_dt = jax.grad(fun=x_curve_lambda)
+        #dy_dt = jax.grad(fun=y_curve_lambda)
+        dx_dt = sp.lambdify(t, x_curve.diff(t), modules="numpy")
+        dy_dt = sp.lambdify(t, y_curve.diff(t), modules="numpy")
 
         def dd_dt(t:list[np.float64], *args) -> list:
             nonlocal x_curve_lambda, y_curve_lambda
@@ -392,24 +205,23 @@ class Bezier:
         elif error_measure_method == "normalized_absolute_residue_sum": error = self.normalized_absolute_residue_sum(y_true=true_y, y_pred=predicted_y)
         else: raise Exception(f"Unknown error measure method: {error_measure_method}")
 
+        self.error_info = {"error":error, "true_y":true_y, "predicted_y":predicted_y}
         return error
 
     #fits a rational Bézier curve to the data set by optimizing control points, control point weights, and
     # elevating the degree of the curve as necessary
     def fit_curve(self, filedata:FileData):
-        multiplier = 1.10
-        tolerance = 0.1
+        tolerance = 0.00001
         error = 100
         iterationCounter = 1
         max_iterations = 1
-        options = {"maxiter":10}
+        options = {"maxiter":25}
         curvature = 0
 
         control_points, self.curve["x_curve"], self.curve["y_curve"], control_weights, t_values = self.initial_curve_guess(filedata.XY)
         self.curve["x_curve"], self.curve["y_curve"] = str(self.curve["x_curve"]), str(self.curve["y_curve"])
         num_control_points = int(len(control_points)/2)
-        args_curve_error = {"XY": filedata.XY, "t_values": t_values, "error_measure_method": "normalized_absolute_residue_sum"}
-        #[1.0241109587268298, 1.015008130957026, 0.9935477564067847, 83.99306216677172, 141.34959090917687, 144.75781320598577, 90.23454894495538, 196.2262497719678, 139.2538262423015]
+        args_curve_error = {"XY": filedata.XY, "t_values": t_values, "error_measure_method": "mean_absolute_log_error"}
 
         old_error = self.curve_error(control_weights + control_points, args_curve_error)
 
@@ -418,113 +230,120 @@ class Bezier:
         bounds = [weight_bounds, weight_bounds, weight_bounds, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound]
         x0 = control_weights + control_points
 
-        while True: #iteratively refines the Bézier curve by adding more control points until error falls below tolerance
-            #control_points = scipy.optimize.basinhopping(func=self.curve_error, x0=control_weights + control_points, minimizer_kwargs={"args":{"XY":filedata.XY, "t_values":t_values}}, niter=10, T=1.1).x.tolist()
+        while True: #iteratively refines the barycentric form of a rational Bézier curve by adding more control points until error falls below tolerance or max_iterations is met
+            #does curve fitting
             control_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=x0, bounds=bounds, options=options, args=args_curve_error).x.tolist()
+
             #separates the control weights and control points from scipy optimization
             control_weights = control_points[:num_control_points]
             control_points = control_points[num_control_points:]
 
-            #saves the current curve into self.curve and prints it in latex form
+            #saves the current curve into self.curve, for calculating curvature
             x_curve, y_curve = self.barycentric_expression(interpolation_points=list(zip(control_points[::2],control_points[1::2])), weights=control_weights, t_values=t_values)
             self.curve["x_curve"], self.curve["y_curve"] = x_curve.replace('j','t'), y_curve.replace('j','t')
-            #print(sp.latex(sp.S(self.curve["x_curve"])) + "\n" + sp.latex(sp.S(self.curve["y_curve"])))
 
-            new_error = self.curve_error(control_weights + control_points, args_curve_error) #new curve
+            error = self.curve_error(control_weights + control_points, args_curve_error) #error of new curve
+
             #checks if conditions are met to exit loop
             if error < tolerance or iterationCounter >= max_iterations:
                 break
             iterationCounter += 1
 
+            #need to elevate curve
+            temp = (abs(self.error_info["predicted_y"] - self.error_info["true_y"]))
+            new_interpolation_point = self.new_interpolation_point(filedata.XY, temp, t_values)
+            control_points, control_weights, t_values = self.elevate_barycentric_curve(control_points, control_weights, t_values, new_interpolation_point)
+
+
         curvature = self.calculate_curvature(x_curve, y_curve, t_values)
         return curvature
 
-            # temp = []
-            # for i in range(int(len(control_points)/2)):
-            #     temp.append((control_points[2*i],control_points[2*i + 1]))
-            #
-            # old_curve_x, old_curve_y =  self.rational_Bezier_expression(len(temp), temp, control_weights)
-            #
-            # new_points, new_weights = self.rational_Bezier_degree_elevation(control_points, control_weights)
-            #
-            # temp = []
-            # for i in range(int(len(new_points)/2)):
-            #     temp.append((new_points[2*i],new_points[2*i + 1]))
-            #
-            # new_curve_x, new_curve_y = self.rational_Bezier_expression(len(temp), temp, new_weights)
-            # print(str(sp.latex(old_curve_x)) + "\n" + str(sp.latex(old_curve_y)))
-            # print(str(sp.latex(new_curve_x)) + "\n" + str(sp.latex(new_curve_y)))
-
-            #
-            # bounds.insert(0, weight_bounds)
-            # bounds.insert(-2, x_bounds)
-            # bounds.insert(-2, y_bounds)
-            #
-            # control_points = new_points
-            # control_weights = new_weights
-            # number_of_control_points = len(control_weights)
-            #
-            # #ensures all control points/weights are within bounds
-            # temp = control_weights+control_points
-            # for i in range(len(temp)):
-            #     if temp[i] < bounds[i][0]:
-            #         temp[i] = bounds[i][0]
-            #     elif temp[i] > bounds[i][1]:
-            #         temp[i] = bounds[i][1]
+    def new_interpolation_point(self, xy:list[floats], abs_residues:list[floats], t_values:list[float]) -> dict:
+        """Finds the x, y, and t for the point on the barycentric curve with the highest error"""
+        default_t = 0.499999
+        t = sp.symbols("t", real=True)
+        new_point = {"x":-1, "y":-1, "t":-1}
+        bound = scipy_optimize.Bounds(0)
 
 
-    #executes degree elevation of a rational Bézier curve, as described in Gerald Fin's Curves and Surfaces for Computer
-    #Aided Geometric Design, section 15.4
-    def rational_Bezier_degree_elevation(self, control_points:list[float], control_weights:list[float]):
-        temp = []
-        for i in range(int(len(control_points) / 2)):
-            temp.append((control_points[2 * i], control_points[2 * i + 1]))
-        control_points = temp
+        index_of_most_error = np.argmax(abs_residues)
+        if type(index_of_most_error) != np.int64:  #incase np.argmax returns an ndarray
+            index_of_most_error = index_of_most_error[0]
 
+        #get x_curve and y_curve and turn into a sympy expression
+        x_curve, y_curve = sp.parse_expr(self.curve["x_curve"],local_dict={'t':t}), sp.parse_expr(self.curve["y_curve"],local_dict={'t':t})
 
-        new_number_of_control_points = len(control_points) + 1
-        elevated_control_points = []
-        elevated_control_weights = []
+        dx_dt = sp.lambdify(t, x_curve.diff(t), modules="numpy")
+        dy_dt = sp.lambdify(t, y_curve.diff(t), modules="numpy")
 
-        elevated_control_points.append((control_weights[0] * control_points[0][0]) / control_weights[0])
-        elevated_control_points.append((control_weights[0] * control_points[0][1]) / control_weights[0])
-        elevated_control_weights.append(control_weights[0])
+        x_curve_lambda, y_curve_lambda = sp.lambdify(t, x_curve, modules="numpy"), sp.lambdify(t, y_curve, modules="numpy")
 
-        for i in range(1, int(len(control_points))):
-            alpha = i / new_number_of_control_points
-            elevated_control_points.append(
-                (control_weights[i - 1] * alpha * control_points[i-1][0] + control_weights[i] * (1 - alpha) * control_points[i][0]) / (control_weights[i - 1] * alpha + control_weights[i] * (1 - alpha)))
-            elevated_control_points.append(
-                (control_weights[i - 1] * alpha * control_points[i-1][1] + control_weights[i] * (1 - alpha) * control_points[i][1]) / (control_weights[i - 1] * alpha + control_weights[i] * (1 - alpha)))
-            elevated_control_weights.append(control_weights[i - 1] * alpha + control_weights[i] * (1 - alpha))
+        def dd_dt(k:list[np.float64], *args) -> list:
+            nonlocal x_curve_lambda, y_curve_lambda
+            out = []
+            for i in k:
+                out.append(((x_curve_lambda(i) - args[0]) * dx_dt(i) + (y_curve_lambda(i) - args[1]) * dy_dt(i)))
+            if type(out) == type(None): out = 0
+            return out
 
-        elevated_control_points.append((control_weights[-1] * control_points[-1][0]) / control_weights[-1])
-        elevated_control_points.append((control_weights[-1] * control_points[-1][1]) / control_weights[-1])
-        elevated_control_weights.append(control_weights[-1])
+        #most likely to break
+        closest_t, i = 0, 0
+        while closest_t in t_values:
+            closest_t = scipy_optimize.minimize(fun=dd_dt, x0=t_values[i]+0.1, args=xy[index_of_most_error], bounds=bound, method="Nelder-Mead").x[0]
 
-        return elevated_control_points, elevated_control_weights
+        new_point["t"] = closest_t
+        new_point["x"], new_point["y"] = x_curve_lambda(closest_t), y_curve_lambda(closest_t)
+        return new_point
 
+    #Implementation of proposition 7 from Ramanantoanina and Hormann's 2021 paper "New shape control tools for rational Bézier curve design"
+    def elevate_barycentric_curve(self, interpolation_points:list[float], weights:list[float], t_values:list[float], new_interpolation_point_values:dict):
+        new_interpolation_point_index = -1
+        new_weights = []
+        new_t_values = copy.deepcopy(t_values)
+
+        #updates interpolation_points and t_values to include new interpolation point
+        for i in range(len(new_t_values)):
+            if new_interpolation_point_values["t"] < new_t_values[i]:
+                new_t_values.insert(i, new_interpolation_point_values["t"])
+                interpolation_points.insert(i, (new_interpolation_point_values["x"], new_interpolation_point_values["y"]))
+                new_interpolation_point_index = i
+                break
+
+        if new_interpolation_point_index == -1:
+            raise Exception("Could not find suitable index for new interpolation point")
+
+        #updates weights to compensate for the new interpolation point,
+        for n in range(len(new_t_values)):
+            if n < new_interpolation_point_index:
+                new_weights.append(weights[n] / (new_interpolation_point_values["t"] - t_values[n]))
+            elif n > new_interpolation_point_index:
+                new_weights.append(weights[n - 1] / (t_values[n - 1] - new_interpolation_point_values["t"]))
+            else: #when n == new_interpolation_point_index
+                temp_weight = 0
+                for j in range(len(weights)):
+                        temp_weight += ((-1) ** (len(weights) + j + new_interpolation_point_index + 1) * weights[j] /
+                                    (t_values[j] - new_interpolation_point_values["t"]))
+                new_weights.append(temp_weight)
+
+        return interpolation_points, new_weights, new_t_values
 
     def calculate_curvature(self, x_curve:str, y_curve:str, t_values:list[float]) -> float:
         t = sp.symbols("t", real=True)
         curvature = 0
 
+        #ensures x_curve & y_curve are copied appropriately
         x_curve, y_curve = sp.parse_expr(str(x_curve).replace('j','t'),local_dict={'t':t}), sp.parse_expr(str(y_curve).replace('j','t'),local_dict={'t':t})
 
-        #x_curve, y_curve = sp.S(copy.deepcopy(x_curve.replace('j','t'))), sp.S(copy.deepcopy(y_curve.replace('j','t'))) #converting str representations of curves to sympy expression
         dx_dt, dy_dt = x_curve.diff(t), y_curve.diff(t) #finding the 1st derivatives
         ddx_dt, ddy_dt = sp.diff(dx_dt, t), sp.diff(dy_dt, t) #finding the 2nd derivatives
 
         numerator = abs(dx_dt * ddy_dt - dy_dt * ddx_dt)
-        denominator = (dx_dt**2 + dy_dt**2)**sp.S(3/2)
+        denominator = (dx_dt * dx_dt + dy_dt * dy_dt)**sp.S(3/2)
         integrand = sp.lambdify(t, numerator / denominator,modules="numpy")
-        curvature = quad(integrand, 0, 1, points=t_values)
-        #curvature = sp.integrals.integrals.integrate(numerator / denominator, (t,0,1)) #calculates the curvature across the whole phragmoplast
+        curvature = sp.integrate(numerator / denominator,t)
+        #curvature = quad(integrand, 0, 1, points=t_values) #approximates the integral with little error, much faster than using sympy
 
         return curvature
-
-
-
 
 # stores data associated with each xy-coordinate file, such as name, the method that provides the best curve fitting, etc
 # along with associated functions for displaying or calculating various attributes
@@ -564,5 +383,49 @@ class FileData:
         for i in range(len(self.XY)):
             print(str(self.XY[i][0]) + "\t" + str(self.XY[i][1]))
 
+class Tests:
+    def All_Tests(self):
+
+        print("Barycentric elevation test: " + str(self.Barycentric_Elevation_Test()))
+        print("Curvature calculation test: " + str(self.Curvature_Test()))
+        return 0
+
+    def Barycentric_Elevation_Test(self) -> bool:
+        # testing degree elevation
+        test = Bezier()
+        output = False
+        interpolation_points = [(1, 0), (12 / 13, 5 / 13), (0, 1)]
+        t_vals = [0, 1 / 3, 1]
+        weights = [2, 13 / 6, 1 / 2]
+
+        x_curve, y_curve = test.barycentric_expression(interpolation_points, weights, t_vals)
+        print(sp.latex(sp.S(x_curve.replace('j', 't'))) + "\n" + sp.latex(sp.S(y_curve.replace('j', 't'))))
+        new_point = {"x": 3 / 5, "y": 4 / 5, "t": 2 / 3}
+
+        expected_interpolation_points = [(1.0, 0.0), (12.0 / 13.0, 5.0 / 13.0), (3.0 / 5.0, 4.0 / 5.0), (0.0, 1.0)]
+        expected_t_vals = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]
+        expected_weights = [3.0, 13.0 / 2.0, 5.0, 1.4999999999999998]
+
+        interpolation_points, weights, t_vals = test.elevate_barycentric_curve(interpolation_points, weights, t_vals, new_point)
+        interpolation_points, weights, t_vals = [(float(x[0]),float(x[1])) for x in interpolation_points], [float(x) for x in weights], [float(x) for x in t_vals]
+
+        if expected_interpolation_points == interpolation_points and expected_t_vals == t_vals and expected_weights == weights:
+            output = True
+
+        return output
+
+    def Curvature_Test(self):
+        test = Bezier()
+        output = False
+        interpolation_points = [(1, 0), (12 / 13, 5 / 13), (0, 1)]
+        t_vals = [0, 1 / 3, 1]
+        weights = [2, 13 / 6, 1 / 2]
+
+        x_curve, y_curve = test.barycentric_expression(interpolation_points, weights, t_vals)
+        curvature = test.calculate_curvature(x_curve, y_curve, t_vals)
+
+        if float(curvature) == 1.0:
+            output = True
 
 
+        return output

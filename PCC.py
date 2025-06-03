@@ -1,17 +1,14 @@
-# -*- coding: utf-8 -*-
-
-#created by Hunter Whitlock, last edited on 5/29/2025
-
 from Classes import *
 from Imports import *
-from Settings import *
+
+DATA_DIRECTORY = "./Data/" #where the .txt's are located and where the .csv will be written
 
 def importData(data_path) -> list:
     output = []
 
     pathList = Path(data_path).glob('**/*.txt')
     for path in pathList: #for each file that ends in .txt in the data_path directory (relative file path)
-        print("reading: " + str(path))
+        print("Reading: " + str(path))
         with open(path, 'r') as file: #opens the file for reading
 
             output.append(copy.deepcopy(FileData(filename=str(path).split("/")[-1]))) #creates new filedata item with name of the file currently being read
@@ -39,8 +36,8 @@ def writeDataToCSV(dataList, outputDirectory):
     for i in range(len(dataList)):
         rowData = {"Filename" : dataList[i].filename}
         rowData["Curvature"] = dataList[i].curvature
-        rowData["x_curve"] = sp.latex(sp.S(dataList[i].bezier.x_curve))
-        rowData["y_curve"] = sp.latex(sp.S(dataList[i].bezier.y_curve))
+        rowData["x_curve"] = sp.latex(sp.S(dataList[i].bezier.curve["x_curve"]))
+        rowData["y_curve"] = sp.latex(sp.S(dataList[i].bezier.curve["y_curve"]))
         csvData.append(copy.deepcopy(rowData))
     
     #writes data to csv
@@ -52,14 +49,31 @@ def writeDataToCSV(dataList, outputDirectory):
 
 
 def main():
-    dataList = importData(data_path=DATA_DIRECTORY)
+    # # testing degree elevation
+    # test = Bezier()
+    # interpolation_points = [(1,0), (12/13,5/13), (0,1)]
+    # t_vals = [0,1/3,1]
+    # weights = [2, 13/6, 1/2]
+    #
+    # x_curve, y_curve = test.barycentric_expression(interpolation_points, weights, t_vals)
+    # print(sp.latex(sp.S(x_curve.replace('j','t'))) + "\n" + sp.latex(sp.S(y_curve.replace('j','t'))))
+    # new_point = {"x":3/5,"y":4/5,"t":2/3}
+    #
+    # interpolation_points, weights, t_vals = test.elevate_barycentric_curve(interpolation_points, weights, t_vals, new_point)
+    #
 
+    #test = Tests()
+    #test.All_Tests()
+
+
+    dataList = importData(data_path=DATA_DIRECTORY)
     for i in range(len(dataList)):
+        print("Analyzing: " + dataList[i].filename)
         dataList[i].findCurvature() #iterates through list, calculating curvature
-        print("Finished analyzing: " + dataList[i].filename)
+
 
     writeDataToCSV(dataList,DATA_DIRECTORY)
-    print("Curvatures stored in the .csv in the data Directory")
+    print("Curvatures stored in the .csv in the data directory")
     
     return 0
 main()
