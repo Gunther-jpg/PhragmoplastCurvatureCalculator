@@ -50,6 +50,7 @@ def writeDataToCSV(dataList, outputDirectory):
 
 def main():
     # # testing degree elevation
+    # t, u = sp.symbols("t, u", real=True)
     # test = Bezier()
     # interpolation_points = [(1,0), (12/13,5/13), (0,1)]
     # t_vals = [0,1/3,1]
@@ -57,13 +58,14 @@ def main():
     #
     # x_curve, y_curve = test.barycentric_expression(interpolation_points, weights, t_vals)
     # print(sp.latex(sp.S(x_curve.replace('j','t'))) + "\n" + sp.latex(sp.S(y_curve.replace('j','t'))))
-    # new_point = {"x":3/5,"y":4/5,"t":2/3}
     #
-    # interpolation_points, weights, t_vals = test.elevate_barycentric_curve(interpolation_points, weights, t_vals, new_point)
-    #
+    # x_curve, y_curve = sp.parse_expr(str(x_curve).replace('j', 't'), local_dict={'t': t}), sp.parse_expr(str(y_curve).replace('j', 't'),local_dict={'t': t})
+    # dx_dt, dy_dt = x_curve.diff(t), y_curve.diff(t)
+    # #arc_length = sp.integrate((dx_dt**2 + dy_dt**2)**0.5, t)
+    # print(sp.latex(arc_length))
 
-    #test = Tests()
-    #test.All_Tests()
+    test = Tests()
+    test.All_Tests()
 
 
     dataList = importData(data_path=DATA_DIRECTORY)

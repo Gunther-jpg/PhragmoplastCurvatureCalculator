@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-import copy
-
-import numpy as np
-import scipy.optimize
-import sympy2jax
 from Imports import *
 
 #stores information associated with Bézier and Bézier curve fitting
@@ -99,16 +94,18 @@ class Bezier:
         num_interpolation_points = len(interpolation_points)
         x_expression = 0
         y_expression = 0
+        common_term = 0
         divisor = 0
-        sig = 1
+        sign = 1
 
         j = sp.symbols("j", real=True)  # parameterized value
 
         for i in range(num_interpolation_points):
-            x_expression += sig * 1 / (j - t_values[i]) * interpolation_points[i][0]
-            y_expression += sig * 1 / (j - t_values[i]) * interpolation_points[i][1]
-            divisor += sig * 1 / (j - t_values[i])
-            sig = -sig
+            common_term = sign * sp.S(weights[i]) / (sp.S(j) - t_values[i])
+            x_expression += common_term * interpolation_points[i][0]
+            y_expression += common_term * interpolation_points[i][1]
+            divisor += common_term
+            sign = -sign
 
         x_expression /= divisor
         y_expression /= divisor
@@ -214,8 +211,8 @@ class Bezier:
         tolerance = 0.00001
         error = 100
         iterationCounter = 1
-        max_iterations = 1
-        options = {"maxiter":25}
+        max_iterations = 3
+        options = {"maxiter":10}
         curvature = 0
 
         control_points, self.curve["x_curve"], self.curve["y_curve"], control_weights, t_values = self.initial_curve_guess(filedata.XY)
@@ -253,14 +250,15 @@ class Bezier:
             temp = (abs(self.error_info["predicted_y"] - self.error_info["true_y"]))
             new_interpolation_point = self.new_interpolation_point(filedata.XY, temp, t_values)
             control_points, control_weights, t_values = self.elevate_barycentric_curve(control_points, control_weights, t_values, new_interpolation_point)
-
+            num_control_points = int(len(control_points) / 2)
 
         curvature = self.calculate_curvature(x_curve, y_curve, t_values)
         return curvature
 
     def new_interpolation_point(self, xy:list[floats], abs_residues:list[floats], t_values:list[float]) -> dict:
         """Finds the x, y, and t for the point on the barycentric curve with the highest error"""
-        default_t = 0.499999
+        small_val = 0.0001
+        default_t = 0.5 - small_val
         t = sp.symbols("t", real=True)
         new_point = {"x":-1, "y":-1, "t":-1}
         bound = scipy_optimize.Bounds(0)
@@ -287,9 +285,15 @@ class Bezier:
             return out
 
         #most likely to break
+        is_close = []
         closest_t, i = 0, 0
-        while closest_t in t_values:
-            closest_t = scipy_optimize.minimize(fun=dd_dt, x0=t_values[i]+0.1, args=xy[index_of_most_error], bounds=bound, method="Nelder-Mead").x[0]
+        while True:
+            closest_t = scipy_optimize.minimize(fun=dd_dt, x0=t_values[i]+small_val, args=xy[index_of_most_error], bounds=bound, method="Nelder-Mead").x[0]
+
+            is_close = [math.isclose(closest_t, t, abs_tol = small_val) for t in t_values] #determines if closest_t is around one of the singularities that occur at t_vals
+            if not True in is_close: #if closest_t is not near a singularity, it is probably is correct, so break the loop
+                break
+            i += 1
 
         new_point["t"] = closest_t
         new_point["x"], new_point["y"] = x_curve_lambda(closest_t), y_curve_lambda(closest_t)
@@ -320,16 +324,22 @@ class Bezier:
                 new_weights.append(weights[n - 1] / (t_values[n - 1] - new_interpolation_point_values["t"]))
             else: #when n == new_interpolation_point_index
                 temp_weight = 0
+                sign = (-1) ** (len(weights) + new_interpolation_point_index + 1)
                 for j in range(len(weights)):
-                        temp_weight += ((-1) ** (len(weights) + j + new_interpolation_point_index + 1) * weights[j] /
-                                    (t_values[j] - new_interpolation_point_values["t"]))
+                        temp_weight +=  sign * weights[j] / (t_values[j] - new_interpolation_point_values["t"])
+                        sign = -sign
                 new_weights.append(temp_weight)
 
         return interpolation_points, new_weights, new_t_values
 
-    def calculate_curvature(self, x_curve:str, y_curve:str, t_values:list[float]) -> float:
+    def calculate_curvature(self, x_curve:str, y_curve:str, t_values:list[np.float64]) -> tuple:
+        """returns the sum of curvature over a parametric curve from 0 to 1, returns the calculated curvature and the error associated"""
         t = sp.symbols("t", real=True)
+        small_val = sp.S(0.00000000001)
         curvature = 0
+
+        for i in range(len(t_values)):
+            t_values[i] = np.float64(t_values[i])
 
         #ensures x_curve & y_curve are copied appropriately
         x_curve, y_curve = sp.parse_expr(str(x_curve).replace('j','t'),local_dict={'t':t}), sp.parse_expr(str(y_curve).replace('j','t'),local_dict={'t':t})
@@ -340,11 +350,9 @@ class Bezier:
         numerator = abs(dx_dt * ddy_dt - dy_dt * ddx_dt)
         denominator = (dx_dt * dx_dt + dy_dt * dy_dt)**sp.S(3/2)
         integrand = sp.lambdify(t, numerator / denominator,modules="numpy")
-        curvature = sp.integrate(numerator / denominator,t)
-        #curvature = quad(integrand, 0, 1, points=t_values) #approximates the integral with little error, much faster than using sympy
+        curvature = quad(integrand, 0, 1, points=t_values) #approximates the integral with little error, much faster than using sympy
 
-        return curvature
-
+        return curvature[0], curvature[1]
 # stores data associated with each xy-coordinate file, such as name, the method that provides the best curve fitting, etc
 # along with associated functions for displaying or calculating various attributes
 class FileData:
@@ -417,14 +425,14 @@ class Tests:
     def Curvature_Test(self):
         test = Bezier()
         output = False
-        interpolation_points = [(1, 0), (12 / 13, 5 / 13), (0, 1)]
-        t_vals = [0, 1 / 3, 1]
-        weights = [2, 13 / 6, 1 / 2]
+        interpolation_points = [(1, 0), (sp.S(12) / 13, sp.S(5) / 13), (0, 1)]
+        t_vals = [0, sp.S(1) / 3, 1]
+        weights = [2, sp.S(13) / 6, sp.S(1) / 2]
 
         x_curve, y_curve = test.barycentric_expression(interpolation_points, weights, t_vals)
-        curvature = test.calculate_curvature(x_curve, y_curve, t_vals)
+        curvature = test.calculate_curvature(x_curve, y_curve, t_vals)[0]
 
-        if float(curvature) == 1.0:
+        if math.isclose(curvature, 1, abs_tol=0.001):
             output = True
 
 
