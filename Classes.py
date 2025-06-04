@@ -249,34 +249,32 @@ class Bezier:
             #need to elevate curve
             temp = (abs(self.error_info["predicted_y"] - self.error_info["true_y"]))
             new_interpolation_point = self.new_interpolation_point(filedata.XY, temp, t_values)
-            control_points, control_weights, t_values = self.elevate_barycentric_curve(control_points, control_weights, t_values, new_interpolation_point)
-            num_control_points = int(len(control_points) / 2)
 
-        curvature = self.calculate_curvature(x_curve, y_curve, t_values)
+            if new_interpolation_point is not None:
+                control_points, control_weights, t_values = self.elevate_barycentric_curve(control_points, control_weights, t_values, new_interpolation_point)
+                num_control_points += 1
+
+        curvature = self.calculate_curvature(x_curve, y_curve, t_values)[0]
         return curvature
 
     def new_interpolation_point(self, xy:list[floats], abs_residues:list[floats], t_values:list[float]) -> dict:
-        """Finds the x, y, and t for the point on the barycentric curve with the highest error"""
+        """Finds the x, y, and t for the point on the barycentric curve with the highest error, returns None if no further interpolation points are likely to improve error"""
         small_val = 0.0001
         default_t = 0.5 - small_val
         t = sp.symbols("t", real=True)
         new_point = {"x":-1, "y":-1, "t":-1}
         bound = scipy_optimize.Bounds(0)
 
-
-        index_of_most_error = np.argmax(abs_residues)
-        if type(index_of_most_error) != np.int64:  #incase np.argmax returns an ndarray
-            index_of_most_error = index_of_most_error[0]
-
-        #get x_curve and y_curve and turn into a sympy expression
-        x_curve, y_curve = sp.parse_expr(self.curve["x_curve"],local_dict={'t':t}), sp.parse_expr(self.curve["y_curve"],local_dict={'t':t})
+        # get x_curve and y_curve and turn into a sympy expression
+        x_curve, y_curve = sp.parse_expr(self.curve["x_curve"], local_dict={'t': t}), sp.parse_expr(
+            self.curve["y_curve"], local_dict={'t': t})
 
         dx_dt = sp.lambdify(t, x_curve.diff(t), modules="numpy")
         dy_dt = sp.lambdify(t, y_curve.diff(t), modules="numpy")
 
         x_curve_lambda, y_curve_lambda = sp.lambdify(t, x_curve, modules="numpy"), sp.lambdify(t, y_curve, modules="numpy")
 
-        def dd_dt(k:list[np.float64], *args) -> list:
+        def dd_dt(k: list[np.float64], *args) -> list:
             nonlocal x_curve_lambda, y_curve_lambda
             out = []
             for i in k:
@@ -284,19 +282,42 @@ class Bezier:
             if type(out) == type(None): out = 0
             return out
 
-        #most likely to break
-        is_close = []
-        closest_t, i = 0, 0
+        #loops eliminating possible new interpolation points if an interpolation point already exists nears the proposed location
         while True:
-            closest_t = scipy_optimize.minimize(fun=dd_dt, x0=t_values[i]+small_val, args=xy[index_of_most_error], bounds=bound, method="Nelder-Mead").x[0]
+            index_of_most_error = np.argmax(abs_residues)
+            if type(index_of_most_error) != np.int64:  #incase np.argmax returns an ndarray
+                index_of_most_error = index_of_most_error[0]
+            #most likely to break
+            i = 0
+            is_close, closest_t = [], []
+            while True:
+                closest_t = scipy_optimize.minimize(fun=dd_dt, x0=t_values[i]+small_val, args=xy[index_of_most_error], bounds=bound, method="Nelder-Mead").x[0]
 
-            is_close = [math.isclose(closest_t, t, abs_tol = small_val) for t in t_values] #determines if closest_t is around one of the singularities that occur at t_vals
-            if not True in is_close: #if closest_t is not near a singularity, it is probably is correct, so break the loop
+                is_close = [math.isclose(closest_t, t, abs_tol = small_val) for t in t_values] #determines if closest_t is around one of the singularities that occur at t_vals
+                if closest_t >= 1 + small_val:
+                    closest_t = None
+                elif not True in is_close: #if closest_t is not near a singularity, it is probably is correct, so break the loop
+                    break
+
+                if len(t_values) == i + 1:
+                    break
+
+                i += 1
+
+            if closest_t is None:
                 break
-            i += 1
+            elif len(abs_residues) <= 1:
+                closest_t = None
+                break
+            else:
+                abs_residues = np.delete(arr=abs_residues, obj=index_of_most_error)
 
-        new_point["t"] = closest_t
-        new_point["x"], new_point["y"] = x_curve_lambda(closest_t), y_curve_lambda(closest_t)
+
+        if closest_t is None:
+            new_point = None
+        else:
+            new_point["t"] = closest_t
+            new_point["x"], new_point["y"] = x_curve_lambda(closest_t), y_curve_lambda(closest_t)
         return new_point
 
     #Implementation of proposition 7 from Ramanantoanina and Hormann's 2021 paper "New shape control tools for rational Bézier curve design"
