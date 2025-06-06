@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from zipfile import error
+
 from Imports import *
 
 #stores information associated with Bézier and Bézier curve fitting
@@ -61,6 +63,14 @@ class Bezier:
         error /= len(y_true)
 
         return float(error)
+
+    def sum_squared_distance(self, x_true:np.ndarray, y_true:np.ndarray, x_pred:np.ndarray, y_pred:np.ndarray) -> float:
+        error = 0
+
+        for i in range(len(x_true)):
+            error += sp.sqrt((x_true[i] - x_pred[i]) ** 2 + (y_true[i] - y_pred[i]) ** 2)
+
+        return error
 
     #use Barycentric form of a Rational Beziér curve to force the curve to fit to the 'vertex' of the phragmoplast
     def initial_curve_guess(self, xy_data):
@@ -184,15 +194,15 @@ class Bezier:
             if type(out) == type(None): out = 0
             return out
 
-        true_y, predicted_y = np.empty(0), np.empty(0)
+        true_x, predicted_x, true_y, predicted_y = np.empty(0), np.empty(0), np.empty(0), np.empty(0)
         for XY in XYList:
-            true_y = np.append(true_y, XY[1])
+            true_x, true_y = np.append(true_x, XY[0]), np.append(true_y, XY[1])
             closest_t = scipy_optimize.fsolve(func=dd_dt, x0=default_t, args=XY)
 
             if closest_t == default_t:
                 closest_t = scipy_optimize.fsolve(func=dd_dt, x0=default_t + 0.1, args=XY)
 
-            predicted_y = np.append(predicted_y, y_curve_lambda(closest_t[0]))
+            predicted_x, predicted_y = np.append(predicted_x, x_curve_lambda(closest_t[0])), np.append(predicted_y, y_curve_lambda(closest_t[0]))
 
         #selects which error measure method to use based on error_measure_method
         if error_measure_method == "mean_squared_error": error = self.mean_squared_error(y_true=true_y, y_pred=predicted_y)
@@ -200,6 +210,7 @@ class Bezier:
         elif error_measure_method == "mean_absolute_percent_error": error = self.mean_absolute_percent_error(y_true=true_y, y_pred=predicted_y)
         elif error_measure_method == "normalized_residue_sum": error = self.normalized_residue_sum(y_true=true_y, y_pred=predicted_y)
         elif error_measure_method == "normalized_absolute_residue_sum": error = self.normalized_absolute_residue_sum(y_true=true_y, y_pred=predicted_y)
+        elif error_measure_method == "sum_squared_distance": error = self.sum_squared_distance(x_true=true_x, y_true=true_y, x_pred=predicted_x, y_pred=predicted_y)
         else: raise Exception(f"Unknown error measure method: {error_measure_method}")
 
         self.error_info = {"error":error, "true_y":true_y, "predicted_y":predicted_y}
@@ -211,8 +222,8 @@ class Bezier:
         tolerance = 0.00001
         error = 100
         iterationCounter = 1
-        max_iterations = 3
-        options = {"maxiter":10}
+        max_iterations = 4
+        options = {"maxiter":100}
         curvature = 0
 
         control_points, self.curve["x_curve"], self.curve["y_curve"], control_weights, t_values = self.initial_curve_guess(filedata.XY)

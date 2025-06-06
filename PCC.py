@@ -64,8 +64,8 @@ def main():
     # #arc_length = sp.integrate((dx_dt**2 + dy_dt**2)**0.5, t)
     # print(sp.latex(arc_length))
 
-    test = Tests()
-    test.All_Tests()
+    #test = Tests()
+    #test.All_Tests()
 
 
     dataList = importData(data_path=DATA_DIRECTORY)
