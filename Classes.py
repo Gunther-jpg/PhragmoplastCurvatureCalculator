@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from zipfile import error
-
 from Imports import *
 
 #stores information associated with Bézier and Bézier curve fitting
@@ -17,13 +15,8 @@ class Bezier:
     def __init__(self):
         self.error_info = dict()
         self.curve = dict()
+
     
-    # write if necessary for initial_curve_guess
-    # def rationa_bezier_to_barycentric(self):
-    #     return 0
-    # 
-    # def barycentric_to_rational_bezier(self):
-    #     return 0
     def normalized_absolute_residue_sum(self, y_true=np.ndarray, y_pred=np.ndarray) -> float:
         error = abs(y_true - y_pred)
         error = np.sum(error)
@@ -63,6 +56,7 @@ class Bezier:
         error /= len(y_true)
 
         return float(error)
+
 
     def sum_squared_distance(self, x_true:np.ndarray, y_true:np.ndarray, x_pred:np.ndarray, y_pred:np.ndarray) -> float:
         error = 0
@@ -169,29 +163,20 @@ class Bezier:
         #lambdify expressions for quick evaluation
         x_curve_lambda, y_curve_lambda = sp.lambdify(t, x_curve, modules="numpy"), sp.lambdify(t, y_curve, modules="numpy")
 
-        def distance_from_bezier(t:float, xCoord:float, yCoord:float) -> float:
-            nonlocal x_curve_lambda, y_curve_lambda
-
-            if isinstance(t, np.ndarray):
-                t = t[0]
-
-            output = sp.sqrt((x_curve_lambda(t)-xCoord)**2 + (y_curve_lambda(t)-yCoord)**2).evalf()
-            return output
-
-
         #appends the true y value and the y value predicted from the Bézier curve to yTrue and yPred, respectively, to calculate error
-        #jaxxed_x_curve = sympy2jax.SymbolicModule(x_curve)
-        #dx_dt = jax.grad(fun=x_curve_lambda)
-        #dy_dt = jax.grad(fun=y_curve_lambda)
         dx_dt = sp.lambdify(t, x_curve.diff(t), modules="numpy")
         dy_dt = sp.lambdify(t, y_curve.diff(t), modules="numpy")
 
+        #derivative of ~distance from XY with respect to t
         def dd_dt(t:list[np.float64], *args) -> list:
             nonlocal x_curve_lambda, y_curve_lambda
             out = []
             for i in t:
                 out.append(((x_curve_lambda(i)-args[0]) * dx_dt(i) + (y_curve_lambda(i) - args[1]) * dy_dt(i)))
-            if type(out) == type(None): out = 0
+            
+            if type(out) == type(None) or None in out: 
+                out = -1
+                print("programatic abuse")
             return out
 
         true_x, predicted_x, true_y, predicted_y = np.empty(0), np.empty(0), np.empty(0), np.empty(0)
@@ -201,10 +186,11 @@ class Bezier:
 
             if closest_t == default_t:
                 closest_t = scipy_optimize.fsolve(func=dd_dt, x0=default_t + 0.1, args=XY)
+                print("closest_t == default_t" + "\tnew t: " + str(closest_t[0]))
 
             predicted_x, predicted_y = np.append(predicted_x, x_curve_lambda(closest_t[0])), np.append(predicted_y, y_curve_lambda(closest_t[0]))
 
-        #selects which error measure method to use based on error_measure_method
+        #selects which error measure method to use based on error_measure_method 
         if error_measure_method == "mean_squared_error": error = self.mean_squared_error(y_true=true_y, y_pred=predicted_y)
         elif error_measure_method == "mean_absolute_log_error":error = self.mean_absolute_log_error(y_true=true_y, y_pred=predicted_y)
         elif error_measure_method == "mean_absolute_percent_error": error = self.mean_absolute_percent_error(y_true=true_y, y_pred=predicted_y)
@@ -222,29 +208,31 @@ class Bezier:
         tolerance = 0.00001
         error = 100
         iterationCounter = 1
-        max_iterations = 4
+        max_iterations = 3
         options = {"maxiter":100}
         curvature = 0
 
         control_points, self.curve["x_curve"], self.curve["y_curve"], control_weights, t_values = self.initial_curve_guess(filedata.XY)
         self.curve["x_curve"], self.curve["y_curve"] = str(self.curve["x_curve"]), str(self.curve["y_curve"])
         num_control_points = int(len(control_points)/2)
-        args_curve_error = {"XY": filedata.XY, "t_values": t_values, "error_measure_method": "mean_absolute_log_error"}
+        args_curve_error = {"XY": filedata.XY, "t_values": t_values, "error_measure_method": "sum_squared_distance"}
 
         old_error = self.curve_error(control_weights + control_points, args_curve_error)
 
-        weight_bounds = (0, 5)
+        weight_bounds = (0, None)
         coord_bound = (1, None)
         bounds = [weight_bounds, weight_bounds, weight_bounds, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound]
-        x0 = control_weights + control_points
+        
 
         while True: #iteratively refines the barycentric form of a rational Bézier curve by adding more control points until error falls below tolerance or max_iterations is met
+            x0 = control_weights + control_points
             #does curve fitting
             control_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=x0, bounds=bounds, options=options, args=args_curve_error).x.tolist()
 
             #separates the control weights and control points from scipy optimization
             control_weights = control_points[:num_control_points]
             control_points = control_points[num_control_points:]
+            
 
             #saves the current curve into self.curve, for calculating curvature
             x_curve, y_curve = self.barycentric_expression(interpolation_points=list(zip(control_points[::2],control_points[1::2])), weights=control_weights, t_values=t_values)
@@ -257,18 +245,24 @@ class Bezier:
                 break
             iterationCounter += 1
 
-            #need to elevate curve
+            #finds 'suitable' values for a new interpolation point 
             temp = (abs(self.error_info["predicted_y"] - self.error_info["true_y"]))
             new_interpolation_point = self.new_interpolation_point(filedata.XY, temp, t_values)
 
+            #if 'suitable' values for a new interpolation point were found update control_points, control_weights, t_values, and bounds
             if new_interpolation_point is not None:
                 control_points, control_weights, t_values = self.elevate_barycentric_curve(control_points, control_weights, t_values, new_interpolation_point)
+
+                bounds.insert(0,weight_bounds)
+                bounds.extend([coord_bound, coord_bound])
+                args_curve_error["t_values"] = t_values
                 num_control_points += 1
+
 
         curvature = self.calculate_curvature(x_curve, y_curve, t_values)[0]
         return curvature
 
-    def new_interpolation_point(self, xy:list[floats], abs_residues:list[floats], t_values:list[float]) -> dict:
+    def new_interpolation_point(self, xy:list[float], abs_residues:list[float], t_values:list[float]) -> dict:
         """Finds the x, y, and t for the point on the barycentric curve with the highest error, returns None if no further interpolation points are likely to improve error"""
         small_val = 0.0001
         default_t = 0.5 - small_val
@@ -290,7 +284,8 @@ class Bezier:
             out = []
             for i in k:
                 out.append(((x_curve_lambda(i) - args[0]) * dx_dt(i) + (y_curve_lambda(i) - args[1]) * dy_dt(i)))
-            if type(out) == type(None): out = 0
+            if type(out) == type(None) or None in out: 
+                out = 0
             return out
 
         #loops eliminating possible new interpolation points if an interpolation point already exists nears the proposed location
@@ -304,24 +299,28 @@ class Bezier:
             while True:
                 closest_t = scipy_optimize.minimize(fun=dd_dt, x0=t_values[i]+small_val, args=xy[index_of_most_error], bounds=bound, method="Nelder-Mead").x[0]
 
-                is_close = [math.isclose(closest_t, t, abs_tol = small_val) for t in t_values] #determines if closest_t is around one of the singularities that occur at t_vals
-                if closest_t >= 1 + small_val:
-                    closest_t = None
-                elif not True in is_close: #if closest_t is not near a singularity, it is probably is correct, so break the loop
+                is_close = [math.isclose(closest_t, t, abs_tol = small_val, rel_tol=0.05) for t in t_values] #determines if closest_t is around one of the singularities that occur at t_vals
+                
+                if not (True in is_close) and closest_t <= 1: #if closest_t is not near a singularity, it is probably is correct, so break the loop
                     break
-
-                if len(t_values) == i + 1:
+                
+                
+                if len(t_values) == i + 1: #if every t_value has been used for x0 for minimize, break
+                    closest_t = None
                     break
 
                 i += 1
 
+            #if no valid t value could be found, remove the sleceted item from abs_residues then loop again only if there is more than 1 item left in abs_residues
+            #otherwise, if a 'good' t_value was found, break
             if closest_t is None:
-                break
+                abs_residues = np.delete(arr=abs_residues, obj=index_of_most_error)
             elif len(abs_residues) <= 1:
                 closest_t = None
                 break
             else:
-                abs_residues = np.delete(arr=abs_residues, obj=index_of_most_error)
+                break
+                
 
 
         if closest_t is None:
@@ -341,7 +340,9 @@ class Bezier:
         for i in range(len(new_t_values)):
             if new_interpolation_point_values["t"] < new_t_values[i]:
                 new_t_values.insert(i, new_interpolation_point_values["t"])
-                interpolation_points.insert(i, (new_interpolation_point_values["x"], new_interpolation_point_values["y"]))
+                interpolation_points.insert(2*i, new_interpolation_point_values["y"])
+                interpolation_points.insert(2*i, new_interpolation_point_values["x"])
+                
                 new_interpolation_point_index = i
                 break
 
@@ -434,20 +435,24 @@ class Tests:
         # testing degree elevation
         test = Bezier()
         output = False
-        interpolation_points = [(1, 0), (12 / 13, 5 / 13), (0, 1)]
+        interpolation_points = [1, 0, 12 / 13, 5 / 13, 0, 1]
         t_vals = [0, 1 / 3, 1]
         weights = [2, 13 / 6, 1 / 2]
 
-        x_curve, y_curve = test.barycentric_expression(interpolation_points, weights, t_vals)
-        print(sp.latex(sp.S(x_curve.replace('j', 't'))) + "\n" + sp.latex(sp.S(y_curve.replace('j', 't'))))
+        # temp = []
+        # for i in range(int(len(interpolation_points)/2)):
+        #     temp.append((interpolation_points[2*i],interpolation_points[2*i+1]))
+
+        #x_curve, y_curve = test.barycentric_expression(temp, weights, t_vals)
+        #print(sp.latex(sp.S(x_curve.replace('j', 't'))) + "\n" + sp.latex(sp.S(y_curve.replace('j', 't'))))
         new_point = {"x": 3 / 5, "y": 4 / 5, "t": 2 / 3}
 
-        expected_interpolation_points = [(1.0, 0.0), (12.0 / 13.0, 5.0 / 13.0), (3.0 / 5.0, 4.0 / 5.0), (0.0, 1.0)]
+        expected_interpolation_points = [1.0, 0.0, 12.0 / 13.0, 5.0 / 13.0, 3.0 / 5.0, 4.0 / 5.0, 0.0, 1.0]
         expected_t_vals = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]
         expected_weights = [3.0, 13.0 / 2.0, 5.0, 1.4999999999999998]
 
         interpolation_points, weights, t_vals = test.elevate_barycentric_curve(interpolation_points, weights, t_vals, new_point)
-        interpolation_points, weights, t_vals = [(float(x[0]),float(x[1])) for x in interpolation_points], [float(x) for x in weights], [float(x) for x in t_vals]
+        interpolation_points, weights, t_vals = [float(x) for x in interpolation_points], [float(x) for x in weights], [float(x) for x in t_vals]
 
         if expected_interpolation_points == interpolation_points and expected_t_vals == t_vals and expected_weights == weights:
             output = True
