@@ -205,7 +205,7 @@ class Bezier:
         elif error_measure_method == "sum_squared_distance": error = self.sum_squared_distance(x_true=true_x, y_true=true_y, x_pred=predicted_x, y_pred=predicted_y)
         else: raise Exception(f"Unknown error measure method: {error_measure_method}")
 
-        self.error_info = {"error":error, "true_y":true_y, "predicted_y":predicted_y}
+        self.error_info = {"error":copy.deepcopy(error), "true_y":copy.deepcopy(true_y), "predicted_y":copy.deepcopy(predicted_y),"true_x":copy.deepcopy(true_x),"predicted_x":copy.deepcopy(predicted_x),}
         return error
 
     #fits a rational Bézier curve to the data set by optimizing control points, control point weights, and
@@ -252,8 +252,10 @@ class Bezier:
             iterationCounter += 1
 
             #finds 'suitable' values for a new interpolation point 
-            temp = (abs(self.error_info["predicted_y"] - self.error_info["true_y"]))
-            new_interpolation_point = self.new_interpolation_point(filedata.XY, temp, t_values)
+            true_xy, pred_xy = [], []
+            residues_2d = ((self.error_info["true_x"] - self.error_info["predicted_x"])**2 + (self.error_info["true_y"] - self.error_info["predicted_y"])**2)**0.5
+            
+            new_interpolation_point = self.new_interpolation_point(filedata.XY, residues_2d, t_values)
 
             #if 'suitable' values for a new interpolation point were found update control_points, control_weights, t_values, and bounds
             if new_interpolation_point is not None:
@@ -293,6 +295,15 @@ class Bezier:
             if type(out) == type(None) or None in out: 
                 out = 0
             return out
+        
+        def dist (k: list[np.float64], *args) -> list:
+            nonlocal x_curve_lambda, y_curve_lambda
+            out = []
+            for i in k:
+                out.append(((args[0]-x_curve_lambda(i))**2 + (args[1]-y_curve_lambda(i))**2)**(0.5))
+            if type(out) == type(None) or None in out: 
+                out = 0
+            return out
 
         #loops eliminating possible new interpolation points if an interpolation point already exists nears the proposed location
         while True:
@@ -303,11 +314,11 @@ class Bezier:
             i = 0
             is_close, closest_t = [], []
             while True:
-                closest_t = scipy_optimize.minimize(fun=dd_dt, x0=t_values[i]+small_val, args=xy[index_of_most_error], bounds=bound, method="Nelder-Mead").x[0]
+                closest_t = scipy_optimize.minimize(fun=dist, x0=t_values[i]+small_val, args=xy[index_of_most_error], bounds=bound, method="Nelder-Mead").x[0]
 
                 is_close = [math.isclose(closest_t, t, abs_tol = small_val, rel_tol=0.05) for t in t_values] #determines if closest_t is around one of the singularities that occur at t_vals
                 
-                if not (True in is_close) and closest_t <= 1: #if closest_t is not near a singularity, it is probably is correct, so break the loop
+                if not (True in is_close) and closest_t <= 1 and closest_t >= 0: #if closest_t is not near a singularity, it is probably is correct, so break the loop
                     break
                 
                 

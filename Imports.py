@@ -14,5 +14,6 @@ from pathlib import Path
 from pickle import GLOBAL
 from dataclasses import dataclass
 
+from scipy.spatial.distance import cdist
 from scipy.special import binom
 from scipy.integrate import quad
