@@ -141,7 +141,8 @@ class Bezier:
 
     #when called, the last arg must be an instance of FileData
     def curve_error(self, *args):
-        default_t = 0.499999
+        small_val = 0.000001
+        default_t = 0.5 - small_val
         warnings.filterwarnings("ignore")
         control_points, weights = [], []
         XYList = args[1]["XY"]
@@ -182,13 +183,18 @@ class Bezier:
         true_x, predicted_x, true_y, predicted_y = np.empty(0), np.empty(0), np.empty(0), np.empty(0)
         for XY in XYList:
             true_x, true_y = np.append(true_x, XY[0]), np.append(true_y, XY[1])
-            closest_t = scipy_optimize.fsolve(func=dd_dt, x0=default_t, args=XY)
-
-            if closest_t == default_t:
+            closest_t = scipy_optimize.fsolve(func=dd_dt, x0=default_t, args=XY)[0]
+            
+            if math.isclose(closest_t, default_t, abs_tol=0.005, rel_tol=0.05):
                 closest_t = scipy_optimize.fsolve(func=dd_dt, x0=default_t + 0.1, args=XY)
-                print("closest_t == default_t" + "\tnew t: " + str(closest_t[0]))
-
-            predicted_x, predicted_y = np.append(predicted_x, x_curve_lambda(closest_t[0])), np.append(predicted_y, y_curve_lambda(closest_t[0]))
+                #print("closest_t == default_t" + "\tnew t: " + str(closest_t[0]))
+            
+            if closest_t > 1:
+                closest_t = 1 - small_val
+            elif closest_t < 0:
+                closest_t = 0 + small_val
+            
+            predicted_x, predicted_y = np.append(predicted_x, x_curve_lambda(closest_t)), np.append(predicted_y, y_curve_lambda(closest_t))
 
         #selects which error measure method to use based on error_measure_method 
         if error_measure_method == "mean_squared_error": error = self.mean_squared_error(y_true=true_y, y_pred=predicted_y)
@@ -219,7 +225,7 @@ class Bezier:
 
         old_error = self.curve_error(control_weights + control_points, args_curve_error)
 
-        weight_bounds = (0, None)
+        weight_bounds = (0, None) #should set max to ~1000
         coord_bound = (1, None)
         bounds = [weight_bounds, weight_bounds, weight_bounds, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound]
         
