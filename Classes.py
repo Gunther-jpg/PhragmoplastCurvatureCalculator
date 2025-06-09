@@ -67,32 +67,38 @@ class Bezier:
         return error
 
     #use Barycentric form of a Rational Beziér curve to force the curve to fit to the 'vertex' of the phragmoplast
-    def initial_curve_guess(self, xy_data):
-        interpolation_points = []
-        x_expression = 0
-        y_expression = 0
-        divisor = 0
-        weight = 1
-        sig = 1
-
-        t = sp.symbols("t", real=True)  # parameterized value
-
-        #finds the barycentric form of a formula that fits the first, middle, and last xy points in xy data
-        x_points = [xy_data[0][0], xy_data[int(len(xy_data)/2)][0], xy_data[-1][0]]
-        y_points = [xy_data[0][1], xy_data[int(len(xy_data)/2)][1], xy_data[-1][1]]
+    def initial_curve_guess(self, xy_data:list[tuple], curve_error_method:str="sum_squared_distance") -> tuple:
+        interpolation_points, interpolation_weights, old_weights, errors = [], [], [], []
         t_values = [0, 0.5, 1]
+        args_curve_error = {"XY":xy_data, "t_values": t_values, "error_measure_method": curve_error_method}
+        small_val = 0.000001
+        options = {"maxiter": 5}
 
-        for i in range(3):
-            x_expression += sig * 1 / (t - t_values[i]) * x_points[i]
-            y_expression += sig * 1 / (t - t_values[i]) * y_points[i]
-            divisor += sig * 1 / (t - t_values[i])
-            interpolation_points += [x_points[i], y_points[i]]
-            sig = -sig
+        #finds the error associated with picking each non-endpoint as the midpoint
+        for i in range(1, len(xy_data) - 1):
+            interpolation_weights = [1, 10, 1]
+            interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[i][0], xy_data[i][1], xy_data[-1][0], xy_data[-1][1]]
+            bounds = [(1, 1), (5, None), (1, 1),
+                      (interpolation_points[0], interpolation_points[0]),
+                      (interpolation_points[1], interpolation_points[1]),
+                      (interpolation_points[2], interpolation_points[2]),
+                      (interpolation_points[3], interpolation_points[3]),
+                      (interpolation_points[4], interpolation_points[4]),
+                      (interpolation_points[5], interpolation_points[5])]
 
-        x_expression /= divisor
-        y_expression /= divisor
+            interpolation_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=interpolation_weights + interpolation_points, bounds=bounds, options=options, args=args_curve_error).x.tolist()
 
-        return interpolation_points, x_expression, y_expression, [1,1,1], t_values
+            interpolation_weights = interpolation_points[:3]
+            interpolation_points = interpolation_points[3:]
+            errors.append(self.curve_error(interpolation_weights + interpolation_points, args_curve_error))
+            old_weights.append(interpolation_weights[1])
+
+        #finds the interpolation point associated with the least error and returns corresponding values
+        index_of_least_error = np.argmin(errors)
+        interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[index_of_least_error][0], xy_data[index_of_least_error][1], xy_data[-1][0], xy_data[-1][1]]
+        interpolation_weights = [1, old_weights[index_of_least_error], 1]
+
+        return interpolation_points, interpolation_weights, t_values
 
     def barycentric_expression(self, interpolation_points:list[tuple], weights:list[float], t_values:list[float]) -> tuple:
         num_interpolation_points = len(interpolation_points)
@@ -214,18 +220,18 @@ class Bezier:
         tolerance = 0.00001
         error = 100
         iterationCounter = 1
-        max_iterations = 3
-        options = {"maxiter":100}
+        max_iterations = 5
+        options = {"maxiter":125}
         curvature = 0
 
-        control_points, self.curve["x_curve"], self.curve["y_curve"], control_weights, t_values = self.initial_curve_guess(filedata.XY)
-        self.curve["x_curve"], self.curve["y_curve"] = str(self.curve["x_curve"]), str(self.curve["y_curve"])
-        num_control_points = int(len(control_points)/2)
+        control_points, control_weights, t_values = self.initial_curve_guess(filedata.XY, "sum_squared_distance")
         args_curve_error = {"XY": filedata.XY, "t_values": t_values, "error_measure_method": "sum_squared_distance"}
 
         old_error = self.curve_error(control_weights + control_points, args_curve_error)
 
-        weight_bounds = (0, None) #should set max to ~1000
+        num_control_points = int(len(control_points) / 2)
+
+        weight_bounds = (0, None)
         coord_bound = (1, None)
         bounds = [weight_bounds, weight_bounds, weight_bounds, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound]
         
@@ -244,7 +250,11 @@ class Bezier:
             x_curve, y_curve = self.barycentric_expression(interpolation_points=list(zip(control_points[::2],control_points[1::2])), weights=control_weights, t_values=t_values)
             self.curve["x_curve"], self.curve["y_curve"] = x_curve.replace('j','t'), y_curve.replace('j','t')
 
+
             error = self.curve_error(control_weights + control_points, args_curve_error) #error of new curve
+            print(filedata.filename + ": " + str(iterationCounter))
+            print("(" + sp.latex(sp.S(self.curve["x_curve"])) + "," + sp.latex(sp.S(self.curve["y_curve"])) + ")")
+            print(error)
 
             #checks if conditions are met to exit loop
             if error < tolerance or iterationCounter >= max_iterations:
@@ -260,7 +270,6 @@ class Bezier:
             #if 'suitable' values for a new interpolation point were found update control_points, control_weights, t_values, and bounds
             if new_interpolation_point is not None:
                 control_points, control_weights, t_values = self.elevate_barycentric_curve(control_points, control_weights, t_values, new_interpolation_point)
-
                 bounds.insert(0,weight_bounds)
                 bounds.extend([coord_bound, coord_bound])
                 args_curve_error["t_values"] = t_values
@@ -307,7 +316,13 @@ class Bezier:
 
         #loops eliminating possible new interpolation points if an interpolation point already exists nears the proposed location
         while True:
-            index_of_most_error = np.argmax(abs_residues)
+
+            if len(abs_residues) > 0:
+                index_of_most_error = np.argmax(abs_residues)
+            else:
+                closest_t = None
+                break
+
             if type(index_of_most_error) != np.int64:  #incase np.argmax returns an ndarray
                 index_of_most_error = index_of_most_error[0]
             #most likely to break
@@ -318,9 +333,8 @@ class Bezier:
 
                 is_close = [math.isclose(closest_t, t, abs_tol = small_val, rel_tol=0.05) for t in t_values] #determines if closest_t is around one of the singularities that occur at t_vals
                 
-                if not (True in is_close) and closest_t <= 1 and closest_t >= 0: #if closest_t is not near a singularity, it is probably is correct, so break the loop
+                if not (True in is_close) and 0 <= closest_t <= 1: #if closest_t is not near a singularity, it is probably is correct, so break the loop
                     break
-                
                 
                 if len(t_values) == i + 1: #if every t_value has been used for x0 for minimize, break
                     closest_t = None
@@ -328,7 +342,7 @@ class Bezier:
 
                 i += 1
 
-            #if no valid t value could be found, remove the sleceted item from abs_residues then loop again only if there is more than 1 item left in abs_residues
+            #if no valid t value could be found, remove the selected item from abs_residues then loop again only if there is more than 1 item left in abs_residues
             #otherwise, if a 'good' t_value was found, break
             if closest_t is None:
                 abs_residues = np.delete(arr=abs_residues, obj=index_of_most_error)
@@ -375,9 +389,18 @@ class Bezier:
             else: #when n == new_interpolation_point_index
                 temp_weight = 0
                 sign = (-1) ** (len(weights) + new_interpolation_point_index + 1)
+
                 for j in range(len(weights)):
                         temp_weight +=  sign * weights[j] / (t_values[j] - new_interpolation_point_values["t"])
                         sign = -sign
+
+                if temp_weight < 0:
+                    temp_weight = 0
+                    sign = (-1) ** (len(weights) + new_interpolation_point_index)
+                    for j in range(len(weights)):
+                        temp_weight += sign * weights[j] / (t_values[j] - new_interpolation_point_values["t"])
+                        sign = -sign
+
                 new_weights.append(temp_weight)
 
         return interpolation_points, new_weights, new_t_values
