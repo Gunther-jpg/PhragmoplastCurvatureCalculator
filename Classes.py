@@ -252,12 +252,10 @@ class Bezier:
 
         while True: #iteratively refines the barycentric form of a rational Bézier curve by adding more control points until error falls below tolerance or max_iterations is met
             x0 = control_weights + control_points
-            #does curve fitting
-            if iterationCounter < max_iterations - 1:
-                control_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=x0, bounds=bounds, options=options, args=args_curve_error).x.tolist()
 
-            else:
-                control_points = scipy_optimize.basinhopping(func=self.curve_error, x0=x0, minimizer_kwargs={"option":sargs_curve_error}).x
+            #does curve fitting
+            control_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=x0, bounds=bounds, options=options, args=args_curve_error).x.tolist()
+
             #separates the control weights and control points from scipy optimization
             control_weights = control_points[:num_control_points]
             control_points = control_points[num_control_points:]
