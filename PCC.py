@@ -49,32 +49,17 @@ def writeDataToCSV(dataList, outputDirectory):
 
 
 def main():
-    # # testing degree elevation
-    # t, u = sp.symbols("t, u", real=True)
-    # test = Bezier()
-    # interpolation_points = [(1,0), (12/13,5/13), (0,1)]
-    # t_vals = [0,1/3,1]
-    # weights = [2, 13/6, 1/2]
-    #
-    # x_curve, y_curve = test.barycentric_expression(interpolation_points, weights, t_vals)
-    # print(sp.latex(sp.S(x_curve.replace('j','t'))) + "\n" + sp.latex(sp.S(y_curve.replace('j','t'))))
-    #
-    # x_curve, y_curve = sp.parse_expr(str(x_curve).replace('j', 't'), local_dict={'t': t}), sp.parse_expr(str(y_curve).replace('j', 't'),local_dict={'t': t})
-    # dx_dt, dy_dt = x_curve.diff(t), y_curve.diff(t)
-    # #arc_length = sp.integrate((dx_dt**2 + dy_dt**2)**0.5, t)
-    # print(sp.latex(arc_length))
 
     test = Tests()
     test.All_Tests()
 
+    data_list = importData(DATA_DIRECTORY)
+    for i in range(len(data_list)):
+        print("Analyzing: " + data_list[i].filename)
+        data_list[i].findCurvature() #iterates through list, calculating curvature
 
-    dataList = importData(data_path=DATA_DIRECTORY)
-    for i in range(len(dataList)):
-        print("Analyzing: " + dataList[i].filename)
-        dataList[i].findCurvature() #iterates through list, calculating curvature
 
-
-    writeDataToCSV(dataList,DATA_DIRECTORY)
+    writeDataToCSV(data_list,DATA_DIRECTORY)
     print("Curvatures stored in the .csv in the data directory")
     
     return 0

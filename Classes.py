@@ -75,28 +75,36 @@ class Bezier:
         options = {"maxiter": 5}
 
         #finds the error associated with picking each non-endpoint as the midpoint
-        for i in range(1, len(xy_data) - 1):
-            interpolation_weights = [1, 10, 1]
-            interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[i][0], xy_data[i][1], xy_data[-1][0], xy_data[-1][1]]
-            bounds = [(1, 1), (5, None), (1, 1),
-                      (interpolation_points[0], interpolation_points[0]),
-                      (interpolation_points[1], interpolation_points[1]),
-                      (interpolation_points[2], interpolation_points[2]),
-                      (interpolation_points[3], interpolation_points[3]),
-                      (interpolation_points[4], interpolation_points[4]),
-                      (interpolation_points[5], interpolation_points[5])]
+        # for i in range(1, len(xy_data) - 1):
+        #     interpolation_weights = [1, 10, 1]
+        #     interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[i][0], xy_data[i][1], xy_data[-1][0], xy_data[-1][1]]
+        #     bounds = [(1, 1), (5, None), (1, 1),
+        #               (interpolation_points[0], interpolation_points[0]),
+        #               (interpolation_points[1], interpolation_points[1]),
+        #               (interpolation_points[2], interpolation_points[2]),
+        #               (interpolation_points[3], interpolation_points[3]),
+        #               (interpolation_points[4], interpolation_points[4]),
+        #               (interpolation_points[5], interpolation_points[5])]
+        #
+        #     interpolation_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=interpolation_weights + interpolation_points, bounds=bounds, options=options, args=args_curve_error).x.tolist()
+        #
+        #     interpolation_weights = interpolation_points[:3]
+        #     interpolation_points = interpolation_points[3:]
+        #     errors.append(self.curve_error(interpolation_weights + interpolation_points, args_curve_error))
+        #     old_weights.append(interpolation_weights[1])
 
-            interpolation_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=interpolation_weights + interpolation_points, bounds=bounds, options=options, args=args_curve_error).x.tolist()
-
-            interpolation_weights = interpolation_points[:3]
-            interpolation_points = interpolation_points[3:]
-            errors.append(self.curve_error(interpolation_weights + interpolation_points, args_curve_error))
-            old_weights.append(interpolation_weights[1])
+        distance = []
+        for i in range(1, len(xy_data) - 1): distance.append(euclidean(xy_data[i], xy_data[0]) + euclidean(xy_data[i], xy_data[-1]))
 
         #finds the interpolation point associated with the least error and returns corresponding values
-        index_of_least_error = np.argmin(errors)
-        interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[index_of_least_error][0], xy_data[index_of_least_error][1], xy_data[-1][0], xy_data[-1][1]]
-        interpolation_weights = [1, old_weights[index_of_least_error], 1]
+        # index_of_least_error = np.argmin(errors)
+        # interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[index_of_least_error][0], xy_data[index_of_least_error][1], xy_data[-1][0], xy_data[-1][1]]
+        # interpolation_weights = [1, old_weights[index_of_least_error], 1]
+
+        index_of_maximal_distance = np.argmax(distance)
+        interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[index_of_maximal_distance][0],
+                                xy_data[index_of_maximal_distance][1], xy_data[-1][0], xy_data[-1][1]]
+        interpolation_weights = [1, 5, 1]
 
         return interpolation_points, interpolation_weights, t_values
 
@@ -176,29 +184,31 @@ class Bezier:
 
         #derivative of ~distance from XY with respect to t
         def dd_dt(t:list[np.float64], *args) -> list:
-            nonlocal x_curve_lambda, y_curve_lambda
+            nonlocal x_curve_lambda, y_curve_lambda, dx_dt, dy_dt
             out = []
             for i in t:
                 out.append(((x_curve_lambda(i)-args[0]) * dx_dt(i) + (y_curve_lambda(i) - args[1]) * dy_dt(i)))
-            
-            if type(out) == type(None) or None in out: 
+
+            if type(out) == type(None) or None in out:
                 out = -1
                 print("programatic abuse")
             return out
 
+        closest_t = 0
         true_x, predicted_x, true_y, predicted_y = np.empty(0), np.empty(0), np.empty(0), np.empty(0)
         for XY in XYList:
             true_x, true_y = np.append(true_x, XY[0]), np.append(true_y, XY[1])
-            closest_t = scipy_optimize.fsolve(func=dd_dt, x0=default_t, args=XY)[0]
-            
-            if math.isclose(closest_t, default_t, abs_tol=0.005, rel_tol=0.05):
-                closest_t = scipy_optimize.fsolve(func=dd_dt, x0=default_t + 0.1, args=XY)
-                #print("closest_t == default_t" + "\tnew t: " + str(closest_t[0]))
-            
-            if closest_t > 1:
-                closest_t = 1 - small_val
-            elif closest_t < 0:
-                closest_t = 0 + small_val
+            t1 = scipy_optimize.fsolve(func=dd_dt, x0=small_val, args=XY)[0]
+            t2 = scipy_optimize.fsolve(func=dd_dt, x0=1 - small_val, args=XY)[0]
+
+            #ensures 0<=t1,t2<=1
+            t1, t2 = min(max(0 + small_val, t1), 1 - small_val), min(max(0 + small_val, t2), 1 - small_val)
+
+            if euclidean((x_curve_lambda(t1),y_curve_lambda(t1)), XY) < euclidean((x_curve_lambda(t2),y_curve_lambda(t2)), XY):
+                closest_t = t1
+            else:
+                closest_t = t2
+
             
             predicted_x, predicted_y = np.append(predicted_x, x_curve_lambda(closest_t)), np.append(predicted_y, y_curve_lambda(closest_t))
 
@@ -221,7 +231,7 @@ class Bezier:
         error = 100
         iterationCounter = 1
         max_iterations = 5
-        options = {"maxiter":125}
+        options = {"maxiter":20}
         curvature = 0
 
         control_points, control_weights, t_values = self.initial_curve_guess(filedata.XY, "sum_squared_distance")
@@ -262,10 +272,12 @@ class Bezier:
             iterationCounter += 1
 
             #finds 'suitable' values for a new interpolation point 
-            true_xy, pred_xy = [], []
-            residues_2d = ((self.error_info["true_x"] - self.error_info["predicted_x"])**2 + (self.error_info["true_y"] - self.error_info["predicted_y"])**2)**0.5
+            true_xy, pred_xy = [list(a) for a in zip(self.error_info["true_x"], self.error_info["true_y"])], [list(a) for a in zip(self.error_info["predicted_x"],self.error_info["predicted_y"])]
+            euclidean_distances = []
+            for i in range(len(self.error_info["true_y"])):
+                euclidean_distances.append(euclidean(true_xy[i], pred_xy[i]))
             
-            new_interpolation_point = self.new_interpolation_point(filedata.XY, residues_2d, t_values)
+            new_interpolation_point = self.new_interpolation_point(filedata.XY, euclidean_distances, t_values)
 
             #if 'suitable' values for a new interpolation point were found update control_points, control_weights, t_values, and bounds
             if new_interpolation_point is not None:
