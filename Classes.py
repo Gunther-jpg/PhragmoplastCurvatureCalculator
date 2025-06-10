@@ -94,7 +94,7 @@ class Bezier:
         #     old_weights.append(interpolation_weights[1])
 
         distance = []
-        for i in range(1, len(xy_data) - 1): distance.append(euclidean(xy_data[i], xy_data[0]) + euclidean(xy_data[i], xy_data[-1]))
+        for i in range(1, len(xy_data) - 1): distance.append(sqeuclidean(xy_data[i], xy_data[0]) + sqeuclidean(xy_data[i], xy_data[-1]))
 
         #finds the interpolation point associated with the least error and returns corresponding values
         # index_of_least_error = np.argmin(errors)
@@ -204,7 +204,7 @@ class Bezier:
             #ensures 0<=t1,t2<=1
             t1, t2 = min(max(0 + small_val, t1), 1 - small_val), min(max(0 + small_val, t2), 1 - small_val)
 
-            if euclidean((x_curve_lambda(t1),y_curve_lambda(t1)), XY) < euclidean((x_curve_lambda(t2),y_curve_lambda(t2)), XY):
+            if sqeuclidean((x_curve_lambda(t1),y_curve_lambda(t1)), XY) < sqeuclidean((x_curve_lambda(t2),y_curve_lambda(t2)), XY):
                 closest_t = t1
             else:
                 closest_t = t2
@@ -230,8 +230,8 @@ class Bezier:
         tolerance = 0.00001
         error = 100
         iterationCounter = 1
-        max_iterations = 5
-        options = {"maxiter":20}
+        max_iterations = 6
+        options = {"maxiter":100}
         curvature = 0
 
         control_points, control_weights, t_values = self.initial_curve_guess(filedata.XY, "sum_squared_distance")
@@ -243,14 +243,21 @@ class Bezier:
 
         weight_bounds = (0, None)
         coord_bound = (1, None)
-        bounds = [weight_bounds, weight_bounds, weight_bounds, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound, coord_bound]
+        bounds = [weight_bounds, weight_bounds, weight_bounds, (control_points[0], control_points[0]), #fixes the endpoints in place
+            (control_points[1], control_points[1]), coord_bound, coord_bound, (control_points[-2], control_points[-2]),
+            (control_points[-1], control_points[-1])]
+
+
         
 
         while True: #iteratively refines the barycentric form of a rational Bézier curve by adding more control points until error falls below tolerance or max_iterations is met
             x0 = control_weights + control_points
             #does curve fitting
-            control_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=x0, bounds=bounds, options=options, args=args_curve_error).x.tolist()
+            if iterationCounter < max_iterations - 1:
+                control_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=x0, bounds=bounds, options=options, args=args_curve_error).x.tolist()
 
+            else:
+                control_points = scipy_optimize.basinhopping(func=self.curve_error, x0=x0, minimizer_kwargs={"option":sargs_curve_error}).x
             #separates the control weights and control points from scipy optimization
             control_weights = control_points[:num_control_points]
             control_points = control_points[num_control_points:]
@@ -273,17 +280,20 @@ class Bezier:
 
             #finds 'suitable' values for a new interpolation point 
             true_xy, pred_xy = [list(a) for a in zip(self.error_info["true_x"], self.error_info["true_y"])], [list(a) for a in zip(self.error_info["predicted_x"],self.error_info["predicted_y"])]
-            euclidean_distances = []
+            squared_euclidean_distances = np.empty(0)
             for i in range(len(self.error_info["true_y"])):
-                euclidean_distances.append(euclidean(true_xy[i], pred_xy[i]))
+                squared_euclidean_distances = np.append(squared_euclidean_distances, sqeuclidean(true_xy[i], pred_xy[i]))
             
-            new_interpolation_point = self.new_interpolation_point(filedata.XY, euclidean_distances, t_values)
+            new_interpolation_point = self.new_interpolation_point(filedata.XY, squared_euclidean_distances, t_values)
 
             #if 'suitable' values for a new interpolation point were found update control_points, control_weights, t_values, and bounds
             if new_interpolation_point is not None:
-                control_points, control_weights, t_values = self.elevate_barycentric_curve(control_points, control_weights, t_values, new_interpolation_point)
+                control_points, control_weights, t_values, index_of_new_values = self.elevate_barycentric_curve(control_points, control_weights, t_values, new_interpolation_point)
+
+                bounds.insert(num_control_points + 2 * index_of_new_values, (control_points[2 * index_of_new_values + 1] / 1.05, control_points[2 * index_of_new_values + 1] * 1.05))
+                bounds.insert(num_control_points + 2 * index_of_new_values, (control_points[2*index_of_new_values]/1.05,control_points[2*index_of_new_values]*1.05))
                 bounds.insert(0,weight_bounds)
-                bounds.extend([coord_bound, coord_bound])
+
                 args_curve_error["t_values"] = t_values
                 num_control_points += 1
 
@@ -415,7 +425,7 @@ class Bezier:
 
                 new_weights.append(temp_weight)
 
-        return interpolation_points, new_weights, new_t_values
+        return interpolation_points, new_weights, new_t_values, new_interpolation_point_index
 
     def calculate_curvature(self, x_curve:str, y_curve:str, t_values:list[np.float64]) -> tuple:
         """returns the sum of curvature over a parametric curve from 0 to 1, returns the calculated curvature and the error associated"""
@@ -503,7 +513,7 @@ class Tests:
         expected_t_vals = [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]
         expected_weights = [3.0, 13.0 / 2.0, 5.0, 1.4999999999999998]
 
-        interpolation_points, weights, t_vals = test.elevate_barycentric_curve(interpolation_points, weights, t_vals, new_point)
+        interpolation_points, weights, t_vals, trash = test.elevate_barycentric_curve(interpolation_points, weights, t_vals, new_point)
         interpolation_points, weights, t_vals = [float(x) for x in interpolation_points], [float(x) for x in weights], [float(x) for x in t_vals]
 
         if expected_interpolation_points == interpolation_points and expected_t_vals == t_vals and expected_weights == weights:

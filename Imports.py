@@ -16,4 +16,4 @@ from dataclasses import dataclass
 
 from scipy.special import binom
 from scipy.integrate import quad
-from scipy.spatial.distance import euclidean
+from scipy.spatial.distance import euclidean, sqeuclidean
