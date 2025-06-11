@@ -74,32 +74,8 @@ class Bezier:
         small_val = 0.000001
         options = {"maxiter": 5}
 
-        #finds the error associated with picking each non-endpoint as the midpoint
-        # for i in range(1, len(xy_data) - 1):
-        #     interpolation_weights = [1, 10, 1]
-        #     interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[i][0], xy_data[i][1], xy_data[-1][0], xy_data[-1][1]]
-        #     bounds = [(1, 1), (5, None), (1, 1),
-        #               (interpolation_points[0], interpolation_points[0]),
-        #               (interpolation_points[1], interpolation_points[1]),
-        #               (interpolation_points[2], interpolation_points[2]),
-        #               (interpolation_points[3], interpolation_points[3]),
-        #               (interpolation_points[4], interpolation_points[4]),
-        #               (interpolation_points[5], interpolation_points[5])]
-        #
-        #     interpolation_points = scipy_optimize.minimize(method='Nelder-Mead', fun=self.curve_error, x0=interpolation_weights + interpolation_points, bounds=bounds, options=options, args=args_curve_error).x.tolist()
-        #
-        #     interpolation_weights = interpolation_points[:3]
-        #     interpolation_points = interpolation_points[3:]
-        #     errors.append(self.curve_error(interpolation_weights + interpolation_points, args_curve_error))
-        #     old_weights.append(interpolation_weights[1])
-
         distance = []
         for i in range(1, len(xy_data) - 1): distance.append(sqeuclidean(xy_data[i], xy_data[0]) + sqeuclidean(xy_data[i], xy_data[-1]))
-
-        #finds the interpolation point associated with the least error and returns corresponding values
-        # index_of_least_error = np.argmin(errors)
-        # interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[index_of_least_error][0], xy_data[index_of_least_error][1], xy_data[-1][0], xy_data[-1][1]]
-        # interpolation_weights = [1, old_weights[index_of_least_error], 1]
 
         index_of_maximal_distance = np.argmax(distance)
         interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[index_of_maximal_distance][0],
@@ -188,23 +164,27 @@ class Bezier:
             out = []
             for i in t:
                 out.append(((x_curve_lambda(i)-args[0]) * dx_dt(i) + (y_curve_lambda(i) - args[1]) * dy_dt(i)))
-
-            if type(out) == type(None) or None in out:
-                out = -1
-                print("programatic abuse")
             return out
+
 
         closest_t = 0
         true_x, predicted_x, true_y, predicted_y = np.empty(0), np.empty(0), np.empty(0), np.empty(0)
-        for XY in XYList:
-            true_x, true_y = np.append(true_x, XY[0]), np.append(true_y, XY[1])
-            t1 = scipy_optimize.fsolve(func=dd_dt, x0=small_val, args=XY)[0]
-            t2 = scipy_optimize.fsolve(func=dd_dt, x0=1 - small_val, args=XY)[0]
+        for i in range(len(XYList)):
+            true_x, true_y = np.append(true_x, XYList[i][0]), np.append(true_y, XYList[i][1])
+            t1 = scipy_optimize.fsolve(func=dd_dt, x0=small_val, args=XYList[i])[0]
+            t2 = scipy_optimize.fsolve(func=dd_dt, x0=1 - small_val, args=XYList[i])[0]
+
+            # t0,distances = [], []
+            # for j in range(len(t_values) - 1):
+            #     t0.append(scipy_optimize.minimize_scalar(fun=lambda x: dd_dt(x, XYList[i]), method="bounded", bounds=(t_values[j] + small_val, t_values[j + 1] - small_val)).x)
+            #     distances.append(sqeuclidean((x_curve_lambda(t0[-1]),y_curve_lambda(t0[-1])), XYList[i]))
+            #
+            # closest_t = t0[np.argmin(distances)]
 
             #ensures 0<=t1,t2<=1
             t1, t2 = min(max(0 + small_val, t1), 1 - small_val), min(max(0 + small_val, t2), 1 - small_val)
 
-            if sqeuclidean((x_curve_lambda(t1),y_curve_lambda(t1)), XY) < sqeuclidean((x_curve_lambda(t2),y_curve_lambda(t2)), XY):
+            if sqeuclidean((x_curve_lambda(t1),y_curve_lambda(t1)), XYList[i]) < sqeuclidean((x_curve_lambda(t2),y_curve_lambda(t2)), XYList[i]):
                 closest_t = t1
             else:
                 closest_t = t2
@@ -230,7 +210,7 @@ class Bezier:
         tolerance = 0.00001
         error = 100
         iterationCounter = 1
-        max_iterations = 6
+        max_iterations = 1
         options = {"maxiter":100}
         curvature = 0
 
@@ -296,7 +276,8 @@ class Bezier:
                 num_control_points += 1
 
 
-        curvature = self.calculate_curvature(x_curve, y_curve, t_values)[0]
+        #curvature = self.calculate_curvature(x_curve, y_curve, t_values)[0]
+        curvature = self.peak_curvature(x_curve, y_curve, t_values)
         return curvature
 
     def new_interpolation_point(self, xy:list[float], abs_residues:list[float], t_values:list[float]) -> dict:
@@ -446,6 +427,37 @@ class Bezier:
         curvature = quad(integrand, 0, 1, points=t_values) #approximates the integral with little error, much faster than using sympy
 
         return curvature[0], curvature[1]
+
+    def peak_curvature(self, x_curve:str, y_curve:str, t_values:list[np.float64]) -> tuple:
+        """returns the sum of curvature over a parametric curve from 0 to 1, returns the calculated curvature and the error associated"""
+        t = sp.symbols("t", real=True)
+        small_val = 0.0000001
+        peak_curvature = 0
+
+        for i in range(len(t_values)):
+            t_values[i] = np.float64(t_values[i])
+
+        #ensures x_curve & y_curve are copied appropriately
+        x_curve, y_curve = sp.parse_expr(str(x_curve).replace('j','t'),local_dict={'t':t}), sp.parse_expr(str(y_curve).replace('j','t'),local_dict={'t':t})
+
+        dx_dt, dy_dt = x_curve.diff(t), y_curve.diff(t) #finding the 1st derivatives
+        ddx_dt, ddy_dt = sp.diff(dx_dt, t), sp.diff(dy_dt, t) #finding the 2nd derivatives
+
+        numerator = abs(dx_dt * ddy_dt - dy_dt * ddx_dt)
+        denominator = (dx_dt * dx_dt + dy_dt * dy_dt)**sp.S(3/2)
+        curvature = sp.lambdify(t, -1 * (numerator / denominator), modules="numpy") #curvature = numerator / denominator, function value negated so that minimization algo can be used
+
+        possible_curvatures = []
+        print(sp.latex(sp.S(numerator / denominator)))
+        for i in range(len(t_values) - 1):
+            t0 = scipy_optimize.minimize_scalar(fun=curvature, method="bounded", bounds=(t_values[i] + small_val, t_values[i + 1] - small_val)).x
+
+            print(str(t0) + "\t" + str(-1*curvature(t0)))
+            t0 = -1 * curvature(t0)
+            possible_curvatures.append(t0)
+
+        peak_curvature = max(possible_curvatures)
+        return peak_curvature
 # stores data associated with each xy-coordinate file, such as name, the method that provides the best curve fitting, etc
 # along with associated functions for displaying or calculating various attributes
 class FileData:
