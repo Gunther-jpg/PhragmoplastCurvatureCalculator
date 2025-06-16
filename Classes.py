@@ -57,7 +57,6 @@ class Bezier:
 
         return float(error)
 
-
     def sum_squared_distance(self, x_true:np.ndarray, y_true:np.ndarray, x_pred:np.ndarray, y_pred:np.ndarray) -> float:
         error = 0
 
@@ -66,7 +65,97 @@ class Bezier:
 
         return error
 
+
+    def rotate_point(self, origin, point, angle) -> tuple:
+        # Code adapted to use sympy from Mark Dickinson's post, found at
+        # https://stackoverflow.com/questions/34372480/rotate-point-about-another-point-in-degrees-python
+
+        """
+        Rotate a point counterclockwise by a given angle around a given origin.
+
+        The angle should be given in radians.
+        """
+
+        ox, oy = origin
+        px, py = point
+
+        cos, sin = sp.cos(angle), sp.sin(angle)
+        px_ox, py_oy = px - ox, py - oy
+        qx = ox + cos * px_ox  - sin * py_oy
+        qy = oy + sin * px_ox + cos * py_oy
+
+        return qx, qy
+
+    def rotate_point_set(self, origin, points:list[tuple], angle) -> list[tuple]:
+        # Code adapted to use sympy and to accept a list of points from Mark Dickinson's post, found at
+        # https://stackoverflow.com/questions/34372480/rotate-point-about-another-point-in-degrees-python
+
+        """
+        Rotate a point counterclockwise by a given angle around a given origin.
+
+        The angle should be given in radians.
+        """
+
+        output = []
+        for point in points:
+            ox, oy = origin
+            px, py = point
+
+            cos, sin = sp.cos(angle), sp.sin(angle)
+            px_ox, py_oy = px - ox, py - oy
+            qx = ox + cos * px_ox - sin * py_oy
+            qy = oy + sin * px_ox + cos * py_oy
+
+            output.append((qx, qy))
+
+        return output
+
+    def scale_point_set(self, points:list[tuple], scaling_factor:float) -> list[tuple]:
+        output = []
+        for point in points: output.append((point[0] * scaling_factor, point[1] * scaling_factor))
+        return output
+
+    def translate_point_set(self, points:list[tuple], horizontal_shift:float, vertical_shift:float) -> list[tuple]:
+        """Moves points in list to (x-horizontal_shift, y+vertical_shift)"""
+
+        output = []
+        for point in points:
+            output.append((point[0] + horizontal_shift, point[1] + vertical_shift))
+        return output
+
+    #rotates, scales, and translates data to be concave down and on the provided domain
+    def normalize_data(self, xy_data:list[tuple], domain:list[tuple]) -> tuple:
+
+        #rotates data
+        center_of_rotation = (xy_data[0][0], xy_data[0][1])
+        theta = sp.tan((xy_data[-1][1] - xy_data[0][1]) / (sp.S(xy_data[-1][0]) - xy_data[0][0]))
+
+        if xy_data[0][0] - xy_data[1][0] <= 0:
+            theta = theta + sp.pi / 2
+        else:
+            theta = theta - sp.pi / 2
+
+        new_xy_data = self.rotate_point_set(center_of_rotation, xy_data, theta)
+
+        #scales data
+        scale_factor = (domain[1][0] - domain[0][0]) / sp.S(new_xy_data[0][0] - new_xy_data[-1][0])
+        new_xy_data = self.scale_point_set(new_xy_data, scale_factor)
+
+        #translates data
+        if xy_data[0][0] - xy_data[-1][0] < 0:
+            horizontal_shift, vertical_shift = domain[-1][0] - new_xy_data[0][0], domain[0][1] - new_xy_data[0][1]
+        else:
+            horizontal_shift, vertical_shift = domain[0][0] - new_xy_data[0][0], domain[0][1] - new_xy_data[0][1]
+
+        new_xy_data = self.translate_point_set(new_xy_data, horizontal_shift, vertical_shift)
+
+        # for i in range(len(xy_data)):
+        #     print(str(new_xy_data[i][0]) + "\t" + str(new_xy_data[i][1]))
+
+        return  new_xy_data, {"theta":theta, "scale_factor":scale_factor, "horizontal_shift":horizontal_shift, "horizontal_shift":vertical_shift}
+
     #use Barycentric form of a Rational Beziér curve to force the curve to fit to the 'vertex' of the phragmoplast
+
     def initial_curve_guess(self, xy_data:list[tuple], curve_error_method:str="sum_squared_distance") -> tuple:
         interpolation_points, interpolation_weights, old_weights, errors = [], [], [], []
         t_values = [0, 0.5, 1]
@@ -212,10 +301,13 @@ class Bezier:
         iterationCounter = 1
         max_iterations = 1
         options = {"maxiter":100}
+        normalization_domain = [(10,0), (110,0)]
         curvature = 0
 
-        control_points, control_weights, t_values = self.initial_curve_guess(filedata.XY, "sum_squared_distance")
-        args_curve_error = {"XY": filedata.XY, "t_values": t_values, "error_measure_method": "sum_squared_distance"}
+        normalized_xy, normalization_info = self.normalize_data(normalized_xy, normalization_domain)
+
+        control_points, control_weights, t_values = self.initial_curve_guess(normalized_xy, "sum_squared_distance")
+        args_curve_error = {"XY": normalized_xy, "t_values": t_values, "error_measure_method": "sum_squared_distance"}
 
         old_error = self.curve_error(control_weights + control_points, args_curve_error)
 
@@ -262,7 +354,7 @@ class Bezier:
             for i in range(len(self.error_info["true_y"])):
                 squared_euclidean_distances = np.append(squared_euclidean_distances, sqeuclidean(true_xy[i], pred_xy[i]))
             
-            new_interpolation_point = self.new_interpolation_point(filedata.XY, squared_euclidean_distances, t_values)
+            new_interpolation_point = self.new_interpolation_point(normalized_xy, squared_euclidean_distances, t_values)
 
             #if 'suitable' values for a new interpolation point were found update control_points, control_weights, t_values, and bounds
             if new_interpolation_point is not None:

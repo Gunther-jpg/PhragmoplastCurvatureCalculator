@@ -50,6 +50,7 @@ def writeDataToCSV(dataList, outputDirectory):
 
 def main():
 
+
     test = Tests()
     test.All_Tests()
 
