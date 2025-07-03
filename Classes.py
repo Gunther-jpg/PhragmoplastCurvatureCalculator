@@ -16,36 +16,6 @@ class Bezier:
         self.error_info = dict()
         self.curve = dict()
 
-    
-    def normalized_absolute_residue_sum(self, y_true=np.ndarray, y_pred=np.ndarray) -> float:
-        error = abs(y_true - y_pred)
-        error = np.sum(error)
-        error = error / np.sum(y_true)
-        return error
-
-    def normalized_residue_sum(self, y_true=np.ndarray, y_pred=np.ndarray) -> float:
-        error = y_true - y_pred
-        error = np.sum(error)
-        error = error / np.sum(y_true)
-        return error
-
-    def mean_absolute_percent_error(self, y_true:np.ndarray, y_pred:np.ndarray) -> float:
-
-        error = (y_true - y_pred) / y_true
-        error = np.sum(abs(error))
-        error /= len(y_true)
-
-        return float(error * 100)
-
-    def mean_absolute_log_error(self, y_true:np.ndarray, y_pred:np.ndarray) -> float:
-
-        error = y_true / y_pred
-        error = np.log10(error)
-        error = np.sum(abs(error))
-        error /= len(y_true)
-
-        return float(error)
-
     def mean_squared_error(self, y_true:np.ndarray, y_pred:np.ndarray) -> float:
         if(len(y_true) != len(y_pred)):
             raise Exception("inputs are of different sizes")
@@ -64,7 +34,6 @@ class Bezier:
             error += sp.sqrt((x_true[i] - x_pred[i]) ** 2 + (y_true[i] - y_pred[i]) ** 2)
 
         return error
-
 
     def rotate_point(self, origin, point, angle) -> tuple:
         # Code adapted to use sympy from Mark Dickinson's post, found at
@@ -97,11 +66,11 @@ class Bezier:
         """
 
         output = []
+        ox, oy = origin
         for point in points:
-            ox, oy = origin
-            px, py = point
 
-            cos, sin = sp.cos(angle), sp.sin(angle)
+            px, py = point
+            cos, sin = sp.cos(angle).evalf(), sp.sin(angle).evalf()
             px_ox, py_oy = px - ox, py - oy
             qx = ox + cos * px_ox - sin * py_oy
             qy = oy + sin * px_ox + cos * py_oy
@@ -124,37 +93,162 @@ class Bezier:
         return output
 
     #rotates, scales, and translates data to be concave down and on the provided domain
-    def normalize_data(self, xy_data:list[tuple], domain:list[tuple]) -> tuple:
+    def normalize_data(self, xy_data:list[tuple], domain:tuple[float, float]) -> tuple:
 
-        #rotates data
+        #rotates data so that the p0=(x0, y0) & pN=(x0 , ?)
         center_of_rotation = (xy_data[0][0], xy_data[0][1])
-        theta = sp.tan((xy_data[-1][1] - xy_data[0][1]) / (sp.S(xy_data[-1][0]) - xy_data[0][0]))
+        is_oriented_top_to_bottom = xy_data[1][1] - xy_data[0][1] < 0
 
-        if xy_data[0][0] - xy_data[1][0] <= 0:
-            theta = theta + sp.pi / 2
+        if math.isclose(xy_data[0][0], xy_data[-1][0]):
+            theta = sp.pi / 2
+        elif math.isclose(xy_data[0][1], xy_data[-1][1]):
+            theta = 0
+        elif is_oriented_top_to_bottom:
+            theta = sp.pi / 2 - sp.atan((xy_data[-1][1] - xy_data[0][1]) / (sp.S(xy_data[-1][0]) - xy_data[0][0]))
         else:
-            theta = theta - sp.pi / 2
-
+            theta = -1* sp.atan((xy_data[-1][1] - xy_data[0][1]) / (sp.S(xy_data[-1][0]) - xy_data[0][0]))
         new_xy_data = self.rotate_point_set(center_of_rotation, xy_data, theta)
 
-        #scales data
-        scale_factor = (domain[1][0] - domain[0][0]) / sp.S(new_xy_data[0][0] - new_xy_data[-1][0])
+        is_oriented_vertically = math.isclose(new_xy_data[0][0], new_xy_data[-1][0])
+
+        #finds the index in the data set that's x or y (depending on if it is oriented vertically) lies closest to the middle x or y
+        if is_oriented_vertically:
+            if new_xy_data[0][1] > new_xy_data[-1][1]:
+                midpoint_y = new_xy_data[0][1] - (new_xy_data[0][1] -  new_xy_data[-1][1])/2
+            else:
+                midpoint_y = new_xy_data[-1][1] - (new_xy_data[-1][1] - new_xy_data[0][1]) / 2
+            # finds the index of the tuple with a y-value closest to the midpoint
+            closest_index_to_midpoint = np.abs(np.array([i[1] for i in new_xy_data[1:]]) - midpoint_y).argmin() + 1
+        else:
+            if new_xy_data[0][0] > new_xy_data[-1][0]:
+                midpoint_x = new_xy_data[0][0] - (new_xy_data[0][0] -  new_xy_data[-1][0])/2
+            else:
+                midpoint_x = new_xy_data[-1][1] - (new_xy_data[-1][1] - new_xy_data[0][0])/2
+            # finds the index of the tuple with an x-value closest to the midpoint
+            closest_index_to_midpoint = np.abs(np.array([i[0] for i in new_xy_data[1:]]) - midpoint_x).argmin() + 1
+
+        #update/define values for rotating data points to be concave down, if necessary
+
+        is_positive_slope = (new_xy_data[closest_index_to_midpoint][1] - new_xy_data[0][1]) / (new_xy_data[closest_index_to_midpoint][0] - new_xy_data[0][0]) > 0
+        is_oriented_top_to_bottom = new_xy_data[1][1] - new_xy_data[0][1] < 0
+
+        #check if data is concave down
+        if is_oriented_vertically == False and new_xy_data[int(len(new_xy_data)/2)][1] > new_xy_data[0][1]:
+            is_concave_down = True
+        else:
+            is_concave_down = False
+
+        #rotates data to be concave down data is not concave down
+        if not is_concave_down:
+            if is_positive_slope == False and is_oriented_top_to_bottom == False:
+                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, -sp.pi / 2)
+                theta = theta - sp.pi / 2
+            elif is_positive_slope == False and is_oriented_top_to_bottom:
+                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, sp.pi / 2)
+                theta += sp.pi / 2
+            elif is_positive_slope and is_oriented_top_to_bottom == False:
+                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, sp.pi / 2)
+                theta += sp.pi / 2
+            elif is_positive_slope and is_oriented_top_to_bottom:
+                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, -sp.pi / 2)
+                theta = theta - sp.pi / 2
+
+        #scales data so that |xN-x0| is equal to the difference of x-values in the given domain
+        scale_factor = abs((domain[1] - domain[0]) / sp.S(new_xy_data[0][0] - new_xy_data[-1][0]))
         new_xy_data = self.scale_point_set(new_xy_data, scale_factor)
 
-        #translates data
-        if xy_data[0][0] - xy_data[-1][0] < 0:
-            horizontal_shift, vertical_shift = domain[-1][0] - new_xy_data[0][0], domain[0][1] - new_xy_data[0][1]
-        else:
-            horizontal_shift, vertical_shift = domain[0][0] - new_xy_data[0][0], domain[0][1] - new_xy_data[0][1]
+        #scales data so that the difference between most extreme x values fits in the domain
+        new_x_vals_temp = np.array([i[0] for i in new_xy_data])
+        min_x_index, max_x_index = new_x_vals_temp.argmin(), new_x_vals_temp.argmax()
 
+        if not math.isclose(new_xy_data[max_x_index][0] - new_xy_data[min_x_index][0], domain[1] - domain[0]):
+            additional_scale_factor = abs((domain[1] - domain[0]) / sp.S(new_xy_data[max_x_index][0] - new_xy_data[min_x_index][0]))
+            new_xy_data = self.scale_point_set(new_xy_data, additional_scale_factor)
+            scale_factor = scale_factor * additional_scale_factor
+
+        #translates data so that xy-values are on the provided domain
+        horizontal_shift, vertical_shift = domain[0] - new_xy_data[min_x_index][0], 0 - new_xy_data[0][1]
         new_xy_data = self.translate_point_set(new_xy_data, horizontal_shift, vertical_shift)
 
         # for i in range(len(xy_data)):
         #     print(str(new_xy_data[i][0]) + "\t" + str(new_xy_data[i][1]))
 
-        return  new_xy_data, {"theta":theta, "scale_factor":scale_factor, "horizontal_shift":horizontal_shift, "horizontal_shift":vertical_shift}
+        return new_xy_data, {"points":new_xy_data, "theta":theta, "scale_factor":scale_factor, "horizontal_shift":horizontal_shift, "vertical_shift":vertical_shift}
 
-    #use Barycentric form of a Rational Beziér curve to force the curve to fit to the 'vertex' of the phragmoplast
+    def denormalize_data(self,points:list[tuple],theta:float,scale_factor:float,horizontal_shift:float,vertical_shift:float) -> list[tuple]:
+
+
+        new_xy_data = self.translate_point_set(points, -1*horizontal_shift, -1*vertical_shift)
+        new_xy_data = self.scale_point_set(new_xy_data, 1/scale_factor)
+        center_of_rotation = (new_xy_data[0][0], new_xy_data[0][1])
+        new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, 2*sp.pi - theta)
+
+        return new_xy_data
+
+    def rotate_curve(self,x_curve:str, y_curve:str, origin:tuple[float,float], t_origin:float, theta:float) -> tuple:
+        new_x_curve, new_y_curve  = "", ""
+        t = sp.symbols("t", real=True)
+
+        x_curve, y_curve = sp.parse_expr(str(x_curve).replace('t', 't'), local_dict={'t': t}), sp.parse_expr(
+            str(y_curve).replace('t', 't'), local_dict={'t': t})
+        new_x_curve = origin[0] + sp.cos(theta) * (x_curve - origin[0]) - sp.sin(theta) * (y_curve - origin[1])
+        new_y_curve = origin[1] + sp.sin(theta) * (x_curve - origin[0]) + sp.cos(theta) * (y_curve - origin[1])
+
+        return str(new_x_curve), str(new_y_curve)
+
+    def scale_curve(self, x_curve:str, y_curve:str, scale_factor:float):
+        new_x_curve, new_y_curve = "", ""
+        t = sp.symbols("t", real=True)
+
+        x_curve, y_curve = sp.parse_expr(str(x_curve).replace('t', 't'), local_dict={'t': t}), sp.parse_expr(
+            str(y_curve).replace('t', 't'), local_dict={'t': t})
+
+        new_x_curve, new_y_curve = x_curve * scale_factor, y_curve * scale_factor
+
+        return str(new_x_curve), str(new_y_curve)
+
+    def translate_curve(self, x_curve:str, y_curve:str, horizontal_shift:float, vertical_shift:float) -> tuple:
+        new_x_curve, new_y_curve = "", ""
+        t = sp.symbols("t", real=True)
+
+        x_curve, y_curve = sp.parse_expr(str(x_curve).replace('t', 't'), local_dict={'t': t}), sp.parse_expr(
+            str(y_curve).replace('t', 't'), local_dict={'t': t})
+
+        new_x_curve, new_y_curve = x_curve + horizontal_shift, y_curve + vertical_shift
+        return str(new_x_curve), str(new_y_curve)
+
+    #should only work when (x(t0), y(t0)) ~= p0
+    def denormalize_curve(self, points:list[tuple], origin:tuple[float,float], x_curve:str, y_curve:str, theta:float, scale_factor:float, horizontal_shift:float, vertical_shift:float) -> tuple:
+        small_val = 0.00000001
+        new_x_curve, new_y_curve = "", ""
+        t = sp.symbols("t", real=True)
+
+        x_curve, y_curve = sp.parse_expr(str(x_curve).replace('j', 't'), local_dict={'t': t}), sp.parse_expr(
+            str(y_curve).replace('j', 't'), local_dict={'t': t})
+
+        new_x_curve, new_y_curve = self.translate_curve(x_curve, y_curve, -horizontal_shift, -vertical_shift)
+        new_x_curve, new_y_curve = self.scale_curve(new_x_curve, new_y_curve, 1 / scale_factor)
+
+        def dist_due_to_theta(t: list[np.float64], *args) -> list:
+            nonlocal points, origin
+            out, temp, dist =  [], [], []
+            for i in t:
+                dist = []
+                temp = self.rotate_point_set(origin,points,i)
+                for i in range(len(temp)):
+                    dist.append(sqeuclidean(temp[i], points[i]))
+                dist = sum(dist)
+                out.append(dist)
+
+            return out
+
+        theta = scipy_optimize.fsolve(func=dist_due_to_theta, x0=theta, args=[])[0]
+
+        rot_x_curve, rot_y_curve = self.rotate_curve(new_x_curve, new_y_curve, origin, small_val, -theta)
+
+
+        return str(new_x_curve), str(new_y_curve)
+
 
     def initial_curve_guess(self, xy_data:list[tuple], curve_error_method:str="sum_squared_distance") -> tuple:
         interpolation_points, interpolation_weights, old_weights, errors = [], [], [], []
@@ -163,12 +257,22 @@ class Bezier:
         small_val = 0.000001
         options = {"maxiter": 5}
 
-        distance = []
-        for i in range(1, len(xy_data) - 1): distance.append(sqeuclidean(xy_data[i], xy_data[0]) + sqeuclidean(xy_data[i], xy_data[-1]))
+        #finds the distance between the first point and every other non-endpoint and
+        # the distance between the last point and every other non-endpoint
+        distance = [[],[]]
+        for i in range(1, len(xy_data) - 1):
+            distance[0].append(sqeuclidean(xy_data[i], xy_data[-1]))
+            distance[1].append(sqeuclidean(xy_data[i], xy_data[0]))
 
-        index_of_maximal_distance = np.argmax(distance)
-        interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[index_of_maximal_distance][0],
-                                xy_data[index_of_maximal_distance][1], xy_data[-1][0], xy_data[-1][1]]
+        #converts distance to store the absolute differences between the distances,
+        # used to find the middle-ish most point, as it is not guaranteed that the points are spaced equally
+        distance = abs(np.array(distance[0]) - np.array(distance[1]))
+
+        middle_most_point = np.argmin(distance)
+        # x_vals_only = np.array([i[0] for i in xy_data])
+        # min_x_index, max_x_index = x_vals_only.argmin(), x_vals_only.argmax()
+        interpolation_points = [xy_data[0][0], xy_data[0][1], xy_data[middle_most_point][0],
+                                xy_data[middle_most_point][1], xy_data[-1][0], xy_data[-1][1]]
         interpolation_weights = [1, 5, 1]
 
         return interpolation_points, interpolation_weights, t_values
@@ -255,38 +359,54 @@ class Bezier:
                 out.append(((x_curve_lambda(i)-args[0]) * dx_dt(i) + (y_curve_lambda(i) - args[1]) * dy_dt(i)))
             return out
 
-
+        #finds the value for t closest to each point, then finds that point on the provided curve
         closest_t = 0
         true_x, predicted_x, true_y, predicted_y = np.empty(0), np.empty(0), np.empty(0), np.empty(0)
-        for i in range(len(XYList)):
-            true_x, true_y = np.append(true_x, XYList[i][0]), np.append(true_y, XYList[i][1])
-            t1 = scipy_optimize.fsolve(func=dd_dt, x0=small_val, args=XYList[i])[0]
-            t2 = scipy_optimize.fsolve(func=dd_dt, x0=1 - small_val, args=XYList[i])[0]
 
-            # t0,distances = [], []
-            # for j in range(len(t_values) - 1):
-            #     t0.append(scipy_optimize.minimize_scalar(fun=lambda x: dd_dt(x, XYList[i]), method="bounded", bounds=(t_values[j] + small_val, t_values[j + 1] - small_val)).x)
-            #     distances.append(sqeuclidean((x_curve_lambda(t0[-1]),y_curve_lambda(t0[-1])), XYList[i]))
-            #
-            # closest_t = t0[np.argmin(distances)]
+        if error_measure_method == "mean_squared_error":
 
-            #ensures 0<=t1,t2<=1
-            t1, t2 = min(max(0 + small_val, t1), 1 - small_val), min(max(0 + small_val, t2), 1 - small_val)
+            def objective_function(t:list[np.float64], *args) -> list:
+                nonlocal x_curve_lambda
+                out = []
+                for i in t:
+                    out.append((x_curve_lambda(i)-args[0])**2)
+                return out
 
-            if sqeuclidean((x_curve_lambda(t1),y_curve_lambda(t1)), XYList[i]) < sqeuclidean((x_curve_lambda(t2),y_curve_lambda(t2)), XYList[i]):
-                closest_t = t1
-            else:
-                closest_t = t2
+            for i in range(len(XYList)):
+                true_x, true_y = np.append(true_x, XYList[i][0]), np.append(true_y, XYList[i][1])
+                t1 = scipy_optimize.fsolve(func=objective_function, x0=small_val, args=XYList[i])[0]
+                t2 = scipy_optimize.fsolve(func=objective_function, x0=1 - small_val, args=XYList[i])[0]
 
-            
-            predicted_x, predicted_y = np.append(predicted_x, x_curve_lambda(closest_t)), np.append(predicted_y, y_curve_lambda(closest_t))
+                # ensures 0<=t1,t2<=1
+                t1, t2 = min(max(0 + small_val, t1), 1 - small_val), min(max(0 + small_val, t2), 1 - small_val)
+
+                if (x_curve_lambda(t1) -  XYList[i][0])**2 < (x_curve_lambda(t2) -  XYList[i][0])**2:
+                    closest_t = t1
+                else:
+                    closest_t = t2
+
+                predicted_x, predicted_y = np.append(predicted_x, x_curve_lambda(closest_t)), np.append(predicted_y,y_curve_lambda(closest_t))
+
+
+        else:
+            for i in range(len(XYList)):
+                true_x, true_y = np.append(true_x, XYList[i][0]), np.append(true_y, XYList[i][1])
+                t1 = scipy_optimize.fsolve(func=dd_dt, x0=small_val, args=XYList[i])[0]
+                t2 = scipy_optimize.fsolve(func=dd_dt, x0=1 - small_val, args=XYList[i])[0]
+
+                #ensures 0<=t1,t2<=1
+                t1, t2 = min(max(0 + small_val, t1), 1 - small_val), min(max(0 + small_val, t2), 1 - small_val)
+
+                if sqeuclidean((x_curve_lambda(t1),y_curve_lambda(t1)), XYList[i]) < sqeuclidean((x_curve_lambda(t2),y_curve_lambda(t2)), XYList[i]):
+                    closest_t = t1
+                else:
+                    closest_t = t2
+
+
+                predicted_x, predicted_y = np.append(predicted_x, x_curve_lambda(closest_t)), np.append(predicted_y, y_curve_lambda(closest_t))
 
         #selects which error measure method to use based on error_measure_method 
         if error_measure_method == "mean_squared_error": error = self.mean_squared_error(y_true=true_y, y_pred=predicted_y)
-        elif error_measure_method == "mean_absolute_log_error":error = self.mean_absolute_log_error(y_true=true_y, y_pred=predicted_y)
-        elif error_measure_method == "mean_absolute_percent_error": error = self.mean_absolute_percent_error(y_true=true_y, y_pred=predicted_y)
-        elif error_measure_method == "normalized_residue_sum": error = self.normalized_residue_sum(y_true=true_y, y_pred=predicted_y)
-        elif error_measure_method == "normalized_absolute_residue_sum": error = self.normalized_absolute_residue_sum(y_true=true_y, y_pred=predicted_y)
         elif error_measure_method == "sum_squared_distance": error = self.sum_squared_distance(x_true=true_x, y_true=true_y, x_pred=predicted_x, y_pred=predicted_y)
         else: raise Exception(f"Unknown error measure method: {error_measure_method}")
 
@@ -298,16 +418,25 @@ class Bezier:
     def fit_curve(self, filedata:FileData):
         tolerance = 0.00001
         error = 100
-        iterationCounter = 1
-        max_iterations = 1
-        options = {"maxiter":100}
-        normalization_domain = [(10,0), (110,0)]
+        iteration_counter = 1
+        max_iterations = 3
+        options = {"maxiter":50}
+        normalization_domain = (10, 110)
         curvature = 0
+        t = sp.symbols("t", real=True)
 
-        normalized_xy, normalization_info = self.normalize_data(normalized_xy, normalization_domain)
+        #applies an affine transformation on the data so that it is (mostly) on the normalization_domain
+        normalized_xy, normalization_info = self.normalize_data(filedata.XY, normalization_domain)
 
-        control_points, control_weights, t_values = self.initial_curve_guess(normalized_xy, "sum_squared_distance")
-        args_curve_error = {"XY": normalized_xy, "t_values": t_values, "error_measure_method": "sum_squared_distance"}
+        #for i in normalized_xy: print(str(i[0]) + "\t" + str(i[1]))
+
+        control_points, control_weights, t_values = self.initial_curve_guess(normalized_xy, "mean_squared_error")
+
+        guess_x, guess_y = self.barycentric_expression(list(zip(control_points[::2],control_points[1::2])), control_weights, t_values)
+        guess_x, guess_y = sp.sympify(guess_x).subs('j', t), sp.sympify(guess_y).subs('j', t)
+        print("(" + sp.latex(sp.S(guess_x)) + "," + sp.latex(sp.S(guess_y)) + ")")
+
+        args_curve_error = {"XY": normalized_xy, "t_values": t_values, "error_measure_method": "mean_squared_error"}
 
         old_error = self.curve_error(control_weights + control_points, args_curve_error)
 
@@ -320,8 +449,6 @@ class Bezier:
             (control_points[-1], control_points[-1])]
 
 
-        
-
         while True: #iteratively refines the barycentric form of a rational Bézier curve by adding more control points until error falls below tolerance or max_iterations is met
             x0 = control_weights + control_points
 
@@ -331,7 +458,7 @@ class Bezier:
             #separates the control weights and control points from scipy optimization
             control_weights = control_points[:num_control_points]
             control_points = control_points[num_control_points:]
-            
+
 
             #saves the current curve into self.curve, for calculating curvature
             x_curve, y_curve = self.barycentric_expression(interpolation_points=list(zip(control_points[::2],control_points[1::2])), weights=control_weights, t_values=t_values)
@@ -339,21 +466,21 @@ class Bezier:
 
 
             error = self.curve_error(control_weights + control_points, args_curve_error) #error of new curve
-            print(filedata.filename + ": " + str(iterationCounter))
-            print("(" + sp.latex(sp.S(self.curve["x_curve"])) + "," + sp.latex(sp.S(self.curve["y_curve"])) + ")")
-            print(error)
+            #print(filedata.filename + ": " + str(iteration_counter))
+            print("Curve formula: " + "(" + sp.latex(sp.S(self.curve["x_curve"])) + "," + sp.latex(sp.S(self.curve["y_curve"])) + ")")
+            print("Error: " + str(error))
 
             #checks if conditions are met to exit loop
-            if error < tolerance or iterationCounter >= max_iterations:
+            if error < tolerance or iteration_counter >= max_iterations:
                 break
-            iterationCounter += 1
+            iteration_counter += 1
 
-            #finds 'suitable' values for a new interpolation point 
+            #finds 'suitable' values for a new interpolation point
             true_xy, pred_xy = [list(a) for a in zip(self.error_info["true_x"], self.error_info["true_y"])], [list(a) for a in zip(self.error_info["predicted_x"],self.error_info["predicted_y"])]
             squared_euclidean_distances = np.empty(0)
             for i in range(len(self.error_info["true_y"])):
                 squared_euclidean_distances = np.append(squared_euclidean_distances, sqeuclidean(true_xy[i], pred_xy[i]))
-            
+
             new_interpolation_point = self.new_interpolation_point(normalized_xy, squared_euclidean_distances, t_values)
 
             #if 'suitable' values for a new interpolation point were found update control_points, control_weights, t_values, and bounds
@@ -366,10 +493,14 @@ class Bezier:
 
                 args_curve_error["t_values"] = t_values
                 num_control_points += 1
+            else:
+                break
 
+        #x_curve, y_curve = self.scale_curve(x_curve, y_curve, 1 / sp.S(normalization_info["scale_factor"]))
 
-        #curvature = self.calculate_curvature(x_curve, y_curve, t_values)[0]
-        curvature = self.peak_curvature(x_curve, y_curve, t_values)
+        #curvature = self.calculate_curvature(x_curve, y_curve, t_values)[0] #calculates total curvature
+        curvature = self.peak_curvature(x_curve, y_curve, t_values) #calculates peak curvature
+        curvature = curvature / normalization_info["scale_factor"]
         return curvature
 
     def new_interpolation_point(self, xy:list[float], abs_residues:list[float], t_values:list[float]) -> dict:
@@ -407,43 +538,47 @@ class Bezier:
                 out = 0
             return out
 
-        #loops eliminating possible new interpolation points if an interpolation point already exists nears the proposed location
-        while True:
 
-            if len(abs_residues) > 0:
-                index_of_most_error = np.argmax(abs_residues)
-            else:
-                closest_t = None
-                break
-
-            if type(index_of_most_error) != np.int64:  #incase np.argmax returns an ndarray
-                index_of_most_error = index_of_most_error[0]
-            #most likely to break
-            i = 0
-            is_close, closest_t = [], []
+        try:
+            # loops eliminating possible new interpolation points if an interpolation point already exists nears the proposed location
             while True:
-                closest_t = scipy_optimize.minimize(fun=dist, x0=t_values[i]+small_val, args=xy[index_of_most_error], bounds=bound, method="Nelder-Mead").x[0]
 
-                is_close = [math.isclose(closest_t, t, abs_tol = small_val, rel_tol=0.05) for t in t_values] #determines if closest_t is around one of the singularities that occur at t_vals
-                
-                if not (True in is_close) and 0 <= closest_t <= 1: #if closest_t is not near a singularity, it is probably is correct, so break the loop
-                    break
-                
-                if len(t_values) == i + 1: #if every t_value has been used for x0 for minimize, break
+                if len(abs_residues) > 0:
+                    index_of_most_error = np.argmax(abs_residues)
+                else:
                     closest_t = None
                     break
 
-                i += 1
+                if type(index_of_most_error) != np.int64:  #incase np.argmax returns an ndarray
+                    index_of_most_error = index_of_most_error[0]
+                #most likely to break
+                i = 0
+                is_close, closest_t = [], []
+                while True:
+                    closest_t = scipy_optimize.minimize(fun=dist, x0=t_values[i]+small_val, args=xy[index_of_most_error], bounds=bound, method="Nelder-Mead").x[0]
 
-            #if no valid t value could be found, remove the selected item from abs_residues then loop again only if there is more than 1 item left in abs_residues
-            #otherwise, if a 'good' t_value was found, break
-            if closest_t is None:
-                abs_residues = np.delete(arr=abs_residues, obj=index_of_most_error)
-            elif len(abs_residues) <= 1:
-                closest_t = None
-                break
-            else:
-                break
+                    is_close = [math.isclose(closest_t, t, abs_tol = small_val, rel_tol=0.05) for t in t_values] #determines if closest_t is around one of the singularities that occur at t_vals
+
+                    if not (True in is_close) and 0 <= closest_t <= 1: #if closest_t is not near a singularity, it is probably is correct, so break the loop
+                        break
+
+                    if len(t_values) == i + 1: #if every t_value has been used for x0 for minimize, break
+                        closest_t = None
+                        break
+
+                    i += 1
+
+                #if no valid t value could be found, remove the selected item from abs_residues then loop again only if there is more than 1 item left in abs_residues
+                #otherwise, if a 'good' t_value was found, break
+                if closest_t is None:
+                    abs_residues = np.delete(arr=abs_residues, obj=index_of_most_error)
+                elif len(abs_residues) <= 1:
+                    closest_t = None
+                    break
+                else:
+                    break
+        except:
+            return None
                 
 
 
@@ -540,16 +675,17 @@ class Bezier:
         curvature = sp.lambdify(t, -1 * (numerator / denominator), modules="numpy") #curvature = numerator / denominator, function value negated so that minimization algo can be used
 
         possible_curvatures = []
-        print(sp.latex(sp.S(numerator / denominator)))
+        print("Curvature function: " + sp.latex(sp.S(numerator / denominator)))
         for i in range(len(t_values) - 1):
             t0 = scipy_optimize.minimize_scalar(fun=curvature, method="bounded", bounds=(t_values[i] + small_val, t_values[i + 1] - small_val)).x
 
-            print(str(t0) + "\t" + str(-1*curvature(t0)))
+            #print(str(t0) + "\t" + str(-1*curvature(t0)))
             t0 = -1 * curvature(t0)
             possible_curvatures.append(t0)
 
         peak_curvature = max(possible_curvatures)
         return peak_curvature
+
 # stores data associated with each xy-coordinate file, such as name, the method that provides the best curve fitting, etc
 # along with associated functions for displaying or calculating various attributes
 class FileData:

@@ -36,8 +36,8 @@ def writeDataToCSV(dataList, outputDirectory):
     for i in range(len(dataList)):
         rowData = {"Filename" : dataList[i].filename}
         rowData["Curvature"] = dataList[i].curvature
-        rowData["x_curve"] = sp.latex(sp.S(dataList[i].bezier.curve["x_curve"]))
-        rowData["y_curve"] = sp.latex(sp.S(dataList[i].bezier.curve["y_curve"]))
+        rowData["x_curve"] = sp.latex(dataList[i].bezier.curve["x_curve"])
+        rowData["y_curve"] = sp.latex(dataList[i].bezier.curve["y_curve"])
         csvData.append(copy.deepcopy(rowData))
     
     #writes data to csv
@@ -56,12 +56,11 @@ def main():
 
     data_list = importData(DATA_DIRECTORY)
     for i in range(len(data_list)):
-        print("Analyzing: " + data_list[i].filename)
+        print("\n" + "Analyzing: " + data_list[i].filename)
         data_list[i].findCurvature() #iterates through list, calculating curvature
-
 
     writeDataToCSV(data_list,DATA_DIRECTORY)
     print("Curvatures stored in the .csv in the data directory")
-    
+
     return 0
 main()
