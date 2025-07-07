@@ -70,10 +70,10 @@ class Bezier:
         for point in points:
 
             px, py = point
-            cos, sin = sp.cos(angle).evalf(), sp.sin(angle).evalf()
+            cos, sin = sp.cos(angle), sp.sin(angle)
             px_ox, py_oy = px - ox, py - oy
-            qx = ox + cos * px_ox - sin * py_oy
-            qy = oy + sin * px_ox + cos * py_oy
+            qx = sp.S(ox + cos * px_ox - sin * py_oy)
+            qy = sp.S(oy + sin * px_ox + cos * py_oy)
 
             output.append((qx, qy))
 
@@ -99,59 +99,50 @@ class Bezier:
         center_of_rotation = (xy_data[0][0], xy_data[0][1])
         is_oriented_top_to_bottom = xy_data[1][1] - xy_data[0][1] < 0
 
-        if math.isclose(xy_data[0][0], xy_data[-1][0]):
-            theta = sp.pi / 2
-        elif math.isclose(xy_data[0][1], xy_data[-1][1]):
-            theta = 0
-        elif is_oriented_top_to_bottom:
-            theta = sp.pi / 2 - sp.atan((xy_data[-1][1] - xy_data[0][1]) / (sp.S(xy_data[-1][0]) - xy_data[0][0]))
-        else:
-            theta = -1* sp.atan((xy_data[-1][1] - xy_data[0][1]) / (sp.S(xy_data[-1][0]) - xy_data[0][0]))
+        # if math.isclose(xy_data[0][0], xy_data[-1][0]):
+        #     theta = sp.pi / 2
+        # elif math.isclose(xy_data[0][1], xy_data[-1][1]):
+        #     theta = 0
+        # elif is_oriented_top_to_bottom:
+        #     theta = sp.pi / 2 - sp.atan((xy_data[-1][1] - xy_data[0][1]) / (sp.S(xy_data[-1][0]) - xy_data[0][0]))
+        # else:
+        #     theta = -1 * sp.atan((xy_data[-1][1] - xy_data[0][1]) / (sp.S(xy_data[-1][0]) - xy_data[0][0]))
+        theta = -1 * sp.atan((xy_data[-1][1] - xy_data[0][1]) / (sp.S(xy_data[-1][0]) - xy_data[0][0]))
         new_xy_data = self.rotate_point_set(center_of_rotation, xy_data, theta)
 
         is_oriented_vertically = math.isclose(new_xy_data[0][0], new_xy_data[-1][0])
 
-        #finds the index in the data set that's x or y (depending on if it is oriented vertically) lies closest to the middle x or y
+        #ensures data is either concave up or down
         if is_oriented_vertically:
-            if new_xy_data[0][1] > new_xy_data[-1][1]:
-                midpoint_y = new_xy_data[0][1] - (new_xy_data[0][1] -  new_xy_data[-1][1])/2
-            else:
-                midpoint_y = new_xy_data[-1][1] - (new_xy_data[-1][1] - new_xy_data[0][1]) / 2
-            # finds the index of the tuple with a y-value closest to the midpoint
-            closest_index_to_midpoint = np.abs(np.array([i[1] for i in new_xy_data[1:]]) - midpoint_y).argmin() + 1
+            new_xy_data = self.rotate_point_set(center_of_rotation, xy_data, sp.pi/2)
+            theta += sp.pi/2
+
+        #finds the index of the middlemost point
+        if new_xy_data[0][0] > new_xy_data[-1][0]:
+            midpoint_x = new_xy_data[0][0] - (new_xy_data[0][0] -  new_xy_data[-1][0])/2
         else:
-            if new_xy_data[0][0] > new_xy_data[-1][0]:
-                midpoint_x = new_xy_data[0][0] - (new_xy_data[0][0] -  new_xy_data[-1][0])/2
+            midpoint_x = new_xy_data[-1][1] - (new_xy_data[-1][1] - new_xy_data[0][0])/2
+
+        #finds the index of the tuple with an x-value closest to the midpoint
+        closest_index_to_midpoint = np.abs(np.array([i[0] for i in new_xy_data[1:]]) - midpoint_x).argmin() + 1
+
+        #finds if the data is oriented concave down
+        is_concave_down = False
+        is_oriented_vertically = math.isclose(new_xy_data[0][0], new_xy_data[-1][0])
+        is_left_to_right = new_xy_data[0][0] < new_xy_data[-1][0]
+
+        if not is_oriented_vertically:
+            if is_left_to_right:
+                is_positive_slope = (new_xy_data[closest_index_to_midpoint][1] - new_xy_data[0][1]) / (new_xy_data[closest_index_to_midpoint][0] - new_xy_data[0][0]) > 0
             else:
-                midpoint_x = new_xy_data[-1][1] - (new_xy_data[-1][1] - new_xy_data[0][0])/2
-            # finds the index of the tuple with an x-value closest to the midpoint
-            closest_index_to_midpoint = np.abs(np.array([i[0] for i in new_xy_data[1:]]) - midpoint_x).argmin() + 1
+                is_positive_slope = (new_xy_data[closest_index_to_midpoint][1] - new_xy_data[0][1]) / (new_xy_data[closest_index_to_midpoint][0] - new_xy_data[0][0]) < 0
 
-        #update/define values for rotating data points to be concave down, if necessary
+            if is_positive_slope: is_concave_down = True
 
-        is_positive_slope = (new_xy_data[closest_index_to_midpoint][1] - new_xy_data[0][1]) / (new_xy_data[closest_index_to_midpoint][0] - new_xy_data[0][0]) > 0
-        is_oriented_top_to_bottom = new_xy_data[1][1] - new_xy_data[0][1] < 0
-
-        #check if data is concave down
-        if is_oriented_vertically == False and new_xy_data[int(len(new_xy_data)/2)][1] > new_xy_data[0][1]:
-            is_concave_down = True
-        else:
-            is_concave_down = False
-
-        #rotates data to be concave down data is not concave down
+        #rotates data to be concave down if necessary
         if not is_concave_down:
-            if is_positive_slope == False and is_oriented_top_to_bottom == False:
-                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, -sp.pi / 2)
-                theta = theta - sp.pi / 2
-            elif is_positive_slope == False and is_oriented_top_to_bottom:
-                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, sp.pi / 2)
-                theta += sp.pi / 2
-            elif is_positive_slope and is_oriented_top_to_bottom == False:
-                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, sp.pi / 2)
-                theta += sp.pi / 2
-            elif is_positive_slope and is_oriented_top_to_bottom:
-                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, -sp.pi / 2)
-                theta = theta - sp.pi / 2
+            new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, sp.pi)
+            theta += sp.pi
 
         #scales data so that |xN-x0| is equal to the difference of x-values in the given domain
         scale_factor = abs((domain[1] - domain[0]) / sp.S(new_xy_data[0][0] - new_xy_data[-1][0]))
@@ -174,6 +165,94 @@ class Bezier:
         #     print(str(new_xy_data[i][0]) + "\t" + str(new_xy_data[i][1]))
 
         return new_xy_data, {"points":new_xy_data, "theta":theta, "scale_factor":scale_factor, "horizontal_shift":horizontal_shift, "vertical_shift":vertical_shift}
+
+        # rotates, scales, and translates data to be concave down and on the provided domain
+
+    def normalize_data_without_scaling(self, xy_data: list[tuple], domain: tuple[float, float]) -> tuple:
+
+        # rotates data so that the p0=(x0, y0) & pN=(x0 , ?)
+        center_of_rotation = (xy_data[0][0], xy_data[0][1])
+        is_oriented_top_to_bottom = xy_data[1][1] - xy_data[0][1] < 0
+
+        if math.isclose(xy_data[0][0], xy_data[-1][0]):
+            theta = sp.pi / 2
+        elif math.isclose(xy_data[0][1], xy_data[-1][1]):
+            theta = 0
+        elif is_oriented_top_to_bottom:
+            theta = sp.pi / 2 - sp.atan((xy_data[-1][1] - xy_data[0][1]) / (sp.S(xy_data[-1][0]) - xy_data[0][0]))
+        else:
+            theta = -1 * sp.atan((xy_data[-1][1] - xy_data[0][1]) / (sp.S(xy_data[-1][0]) - xy_data[0][0]))
+        new_xy_data = self.rotate_point_set(center_of_rotation, xy_data, theta)
+
+        is_oriented_vertically = math.isclose(new_xy_data[0][0], new_xy_data[-1][0])
+
+        # finds the index in the data set that's x or y (depending on if it is oriented vertically) lies closest to the middle x or y
+        if is_oriented_vertically:
+            if new_xy_data[0][1] > new_xy_data[-1][1]:
+                midpoint_y = new_xy_data[0][1] - (new_xy_data[0][1] - new_xy_data[-1][1]) / 2
+            else:
+                midpoint_y = new_xy_data[-1][1] - (new_xy_data[-1][1] - new_xy_data[0][1]) / 2
+            # finds the index of the tuple with a y-value closest to the midpoint
+            closest_index_to_midpoint = np.abs(np.array([i[1] for i in new_xy_data[1:]]) - midpoint_y).argmin() + 1
+        else:
+            if new_xy_data[0][0] > new_xy_data[-1][0]:
+                midpoint_x = new_xy_data[0][0] - (new_xy_data[0][0] - new_xy_data[-1][0]) / 2
+            else:
+                midpoint_x = new_xy_data[-1][1] - (new_xy_data[-1][1] - new_xy_data[0][0]) / 2
+            # finds the index of the tuple with an x-value closest to the midpoint
+            closest_index_to_midpoint = np.abs(np.array([i[0] for i in new_xy_data[1:]]) - midpoint_x).argmin() + 1
+
+        # update/define values for rotating data points to be concave down, if necessary
+
+        is_positive_slope = (new_xy_data[closest_index_to_midpoint][1] - new_xy_data[0][1]) / (
+                    new_xy_data[closest_index_to_midpoint][0] - new_xy_data[0][0]) > 0
+        is_oriented_top_to_bottom = new_xy_data[1][1] - new_xy_data[0][1] < 0
+
+        # check if data is concave down
+        if is_oriented_vertically == False and new_xy_data[int(len(new_xy_data) / 2)][1] > new_xy_data[0][1]:
+            is_concave_down = True
+        else:
+            is_concave_down = False
+
+        # rotates data to be concave down data is not concave down
+        if not is_concave_down:
+            if is_positive_slope == False and is_oriented_top_to_bottom == False:
+                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, -sp.pi / 2)
+                theta = theta - sp.pi / 2
+            elif is_positive_slope == False and is_oriented_top_to_bottom:
+                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, sp.pi / 2)
+                theta += sp.pi / 2
+            elif is_positive_slope and is_oriented_top_to_bottom == False:
+                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, sp.pi / 2)
+                theta += sp.pi / 2
+            elif is_positive_slope and is_oriented_top_to_bottom:
+                new_xy_data = self.rotate_point_set(center_of_rotation, new_xy_data, -sp.pi / 2)
+                theta = theta - sp.pi / 2
+
+        # # scales data so that |xN-x0| is equal to the difference of x-values in the given domain
+        # scale_factor = abs((domain[1] - domain[0]) / sp.S(new_xy_data[0][0] - new_xy_data[-1][0]))
+        # new_xy_data = self.scale_point_set(new_xy_data, scale_factor)
+
+        #finds most extreme x_vals
+        new_x_vals_temp = np.array([i[0] for i in new_xy_data])
+        min_x_index, max_x_index = new_x_vals_temp.argmin(), new_x_vals_temp.argmax()
+
+        ## scales data so that the difference between most extreme x values fits in the domain
+        # if not math.isclose(new_xy_data[max_x_index][0] - new_xy_data[min_x_index][0], domain[1] - domain[0]):
+        #     additional_scale_factor = abs(
+        #         (domain[1] - domain[0]) / sp.S(new_xy_data[max_x_index][0] - new_xy_data[min_x_index][0]))
+        #     new_xy_data = self.scale_point_set(new_xy_data, additional_scale_factor)
+        #     scale_factor = scale_factor * additional_scale_factor
+
+        # translates data so that xy-values are on the provided domain
+        horizontal_shift, vertical_shift = domain[0] - new_xy_data[min_x_index][0], 0 - new_xy_data[0][1]
+        new_xy_data = self.translate_point_set(new_xy_data, horizontal_shift, vertical_shift)
+
+        # for i in range(len(xy_data)):
+        #     print(str(new_xy_data[i][0]) + "\t" + str(new_xy_data[i][1]))
+
+        return new_xy_data, {"points": new_xy_data, "theta": theta,
+                             "horizontal_shift": horizontal_shift, "vertical_shift": vertical_shift}
 
     def denormalize_data(self,points:list[tuple],theta:float,scale_factor:float,horizontal_shift:float,vertical_shift:float) -> list[tuple]:
 
@@ -419,22 +498,23 @@ class Bezier:
         tolerance = 0.00001
         error = 100
         iteration_counter = 1
-        max_iterations = 3
+        max_iterations = 5
         options = {"maxiter":50}
         normalization_domain = (10, 110)
+        multiplier = 1.025
         curvature = 0
         t = sp.symbols("t", real=True)
 
         #applies an affine transformation on the data so that it is (mostly) on the normalization_domain
+        # normalized_xy, normalization_info = self.normalize_data(filedata.XY, normalization_domain)
         normalized_xy, normalization_info = self.normalize_data(filedata.XY, normalization_domain)
-
-        #for i in normalized_xy: print(str(i[0]) + "\t" + str(i[1]))
+        for i in normalized_xy: print(str(i[0]) + "\t" + str(i[1]))
 
         control_points, control_weights, t_values = self.initial_curve_guess(normalized_xy, "mean_squared_error")
 
         guess_x, guess_y = self.barycentric_expression(list(zip(control_points[::2],control_points[1::2])), control_weights, t_values)
         guess_x, guess_y = sp.sympify(guess_x).subs('j', t), sp.sympify(guess_y).subs('j', t)
-        print("(" + sp.latex(sp.S(guess_x)) + "," + sp.latex(sp.S(guess_y)) + ")")
+        print("Initial guess: " + "(" + sp.latex(sp.S(guess_x)) + "," + sp.latex(sp.S(guess_y)) + ")")
 
         args_curve_error = {"XY": normalized_xy, "t_values": t_values, "error_measure_method": "mean_squared_error"}
 
@@ -442,10 +522,15 @@ class Bezier:
 
         num_control_points = int(len(control_points) / 2)
 
+        x_only, y_only = [i[0] for i in normalized_xy], [i[1] for i in normalized_xy]
+
+
         weight_bounds = (0, None)
-        coord_bound = (1, None)
+        x_bound = (min(x_only) / multiplier, max(x_only) * multiplier)
+        y_bound = (min(y_only) / multiplier, max(y_only) * multiplier)
+        #coord_bound = (1, None)
         bounds = [weight_bounds, weight_bounds, weight_bounds, (control_points[0], control_points[0]), #fixes the endpoints in place
-            (control_points[1], control_points[1]), coord_bound, coord_bound, (control_points[-2], control_points[-2]),
+            (control_points[1], control_points[1]), x_bound, y_bound, (control_points[-2], control_points[-2]),
             (control_points[-1], control_points[-1])]
 
 
@@ -467,8 +552,7 @@ class Bezier:
 
             error = self.curve_error(control_weights + control_points, args_curve_error) #error of new curve
             #print(filedata.filename + ": " + str(iteration_counter))
-            print("Curve formula: " + "(" + sp.latex(sp.S(self.curve["x_curve"])) + "," + sp.latex(sp.S(self.curve["y_curve"])) + ")")
-            print("Error: " + str(error))
+            print("Error: " + str(error) + "\t" + "Curve formula: " + "(" + sp.latex(sp.S(self.curve["x_curve"])) + "," + sp.latex(sp.S(self.curve["y_curve"])) + ")")
 
             #checks if conditions are met to exit loop
             if error < tolerance or iteration_counter >= max_iterations:
@@ -487,8 +571,10 @@ class Bezier:
             if new_interpolation_point is not None:
                 control_points, control_weights, t_values, index_of_new_values = self.elevate_barycentric_curve(control_points, control_weights, t_values, new_interpolation_point)
 
-                bounds.insert(num_control_points + 2 * index_of_new_values, (control_points[2 * index_of_new_values + 1] / 1.05, control_points[2 * index_of_new_values + 1] * 1.05))
-                bounds.insert(num_control_points + 2 * index_of_new_values, (control_points[2*index_of_new_values]/1.05,control_points[2*index_of_new_values]*1.05))
+                # bounds.insert(num_control_points + 2 * index_of_new_values, (control_points[2 * index_of_new_values + 1] / 1.05, control_points[2 * index_of_new_values + 1] * 1.05))
+                # bounds.insert(num_control_points + 2 * index_of_new_values, (control_points[2*index_of_new_values]/1.05,control_points[2*index_of_new_values]*1.05))
+                bounds.insert(num_control_points + 2 * index_of_new_values, y_bound)
+                bounds.insert(num_control_points + 2 * index_of_new_values, x_bound)
                 bounds.insert(0,weight_bounds)
 
                 args_curve_error["t_values"] = t_values
@@ -496,12 +582,14 @@ class Bezier:
             else:
                 break
 
-        #x_curve, y_curve = self.scale_curve(x_curve, y_curve, 1 / sp.S(normalization_info["scale_factor"]))
-
+        prenormalized_curvature = self.calculate_curvature(x_curve, y_curve, t_values)[0]
+        x_curve, y_curve = self.scale_curve(x_curve, y_curve, 1 / sp.S(normalization_info["scale_factor"]))
         #curvature = self.calculate_curvature(x_curve, y_curve, t_values)[0] #calculates total curvature
         curvature = self.peak_curvature(x_curve, y_curve, t_values) #calculates peak curvature
-        curvature = curvature / normalization_info["scale_factor"]
-        return curvature
+        #curvature = curvature / normalization_info["scale_factor"]
+        #print("scale factor: " + str(normalization_info["scale_factor"]) + "\t" + "pre-normalized curvature: " + str(curvature * normalization_info["scale_factor"]) + "\t" + "normalized curvature: " + str(curvature))
+        print("Normalized curvature: " + str(curvature[0]) + "\t" + "Prenormalized curvature: " + str(prenormalized_curvature) + "\t" + "t_with_greatest_curvature: " + str(curvature[1]))
+        return curvature[0]
 
     def new_interpolation_point(self, xy:list[float], abs_residues:list[float], t_values:list[float]) -> dict:
         """Finds the x, y, and t for the point on the barycentric curve with the highest error, returns None if no further interpolation points are likely to improve error"""
@@ -671,20 +759,22 @@ class Bezier:
         ddx_dt, ddy_dt = sp.diff(dx_dt, t), sp.diff(dy_dt, t) #finding the 2nd derivatives
 
         numerator = abs(dx_dt * ddy_dt - dy_dt * ddx_dt)
-        denominator = (dx_dt * dx_dt + dy_dt * dy_dt)**sp.S(3/2)
+        denominator = (dx_dt**2  + dy_dt**2)**sp.S(3/2)
         curvature = sp.lambdify(t, -1 * (numerator / denominator), modules="numpy") #curvature = numerator / denominator, function value negated so that minimization algo can be used
 
-        possible_curvatures = []
+        possible_curvatures, curvature_t_vals = [], []
         print("Curvature function: " + sp.latex(sp.S(numerator / denominator)))
         for i in range(len(t_values) - 1):
             t0 = scipy_optimize.minimize_scalar(fun=curvature, method="bounded", bounds=(t_values[i] + small_val, t_values[i + 1] - small_val)).x
 
-            #print(str(t0) + "\t" + str(-1*curvature(t0)))
-            t0 = -1 * curvature(t0)
-            possible_curvatures.append(t0)
+            possible_curvatures.append(-1 * curvature(t0))
+            curvature_t_vals.append(t0)
 
-        peak_curvature = max(possible_curvatures)
-        return peak_curvature
+        index = np.array(possible_curvatures).argmax()
+        peak_curvature = possible_curvatures[index]
+        t_with_greatest_curvature = curvature_t_vals[index]
+
+        return peak_curvature, t_with_greatest_curvature
 
 # stores data associated with each xy-coordinate file, such as name, the method that provides the best curve fitting, etc
 # along with associated functions for displaying or calculating various attributes

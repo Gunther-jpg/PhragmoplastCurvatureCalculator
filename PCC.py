@@ -35,13 +35,13 @@ def writeDataToCSV(dataList, outputDirectory):
     #for each file read, adds values to csvData to be written to .csv
     for i in range(len(dataList)):
         rowData = {"Filename" : dataList[i].filename}
-        rowData["Curvature"] = dataList[i].curvature
+        rowData["Peak Non-normalized Curvature"] = dataList[i].curvature
         rowData["x_curve"] = sp.latex(dataList[i].bezier.curve["x_curve"])
         rowData["y_curve"] = sp.latex(dataList[i].bezier.curve["y_curve"])
         csvData.append(copy.deepcopy(rowData))
     
     #writes data to csv
-    with open(outputDirectory + "TotalCurvatures.csv", "w", newline='') as csvfile:
+    with open(outputDirectory + "Curvatures.csv", "w", newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=[item for item in csvData[0].keys()])
         writer.writeheader()
         writer.writerows(csvData)
@@ -49,7 +49,6 @@ def writeDataToCSV(dataList, outputDirectory):
 
 
 def main():
-
 
     test = Tests()
     test.All_Tests()
