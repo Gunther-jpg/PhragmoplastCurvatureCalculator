@@ -133,9 +133,9 @@ class Bezier:
 
         if not is_oriented_vertically:
             if is_left_to_right:
-                is_positive_slope = (new_xy_data[closest_index_to_midpoint][1] - new_xy_data[0][1]) / (new_xy_data[closest_index_to_midpoint][0] - new_xy_data[0][0]) > 0
+                is_positive_slope = (new_xy_data[closest_index_to_midpoint][1] - new_xy_data[0][1]) / (new_xy_data[closest_index_to_midpoint][0] - new_xy_data[0][0]) >= 0
             else:
-                is_positive_slope = (new_xy_data[closest_index_to_midpoint][1] - new_xy_data[0][1]) / (new_xy_data[closest_index_to_midpoint][0] - new_xy_data[0][0]) < 0
+                is_positive_slope = (new_xy_data[closest_index_to_midpoint][1] - new_xy_data[0][1]) / (new_xy_data[closest_index_to_midpoint][0] - new_xy_data[0][0]) <= 0
 
             if is_positive_slope: is_concave_down = True
 
