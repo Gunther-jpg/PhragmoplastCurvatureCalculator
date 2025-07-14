@@ -35,9 +35,10 @@ def writeDataToCSV(dataList, outputDirectory):
     #for each file read, adds values to csvData to be written to .csv
     for i in range(len(dataList)):
         rowData = {"Filename" : dataList[i].filename}
-        rowData["Peak Non-normalized Curvature"] = dataList[i].curvature
-        rowData["x_curve"] = sp.latex(dataList[i].bezier.curve["x_curve"])
-        rowData["y_curve"] = sp.latex(dataList[i].bezier.curve["y_curve"])
+        rowData["Peak Curvature"] = dataList[i].curvature
+        rowData["Error"] = dataList[i].bezier.error_info["error"]
+        rowData["x_curve"] = str(sp.latex(dataList[i].bezier.curve["x_curve"]))
+        rowData["y_curve"] = str(sp.latex(dataList[i].bezier.curve["y_curve"]))
         csvData.append(copy.deepcopy(rowData))
     
     #writes data to csv

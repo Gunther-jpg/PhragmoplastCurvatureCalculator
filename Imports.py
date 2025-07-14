@@ -4,6 +4,7 @@ import copy
 import csv
 import traceback
 import scipy.optimize as scipy_optimize
+import scipy.signal as scipy_signal
 
 import sympy as sp
 import pandas as pd

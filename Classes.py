@@ -498,7 +498,7 @@ class Bezier:
         tolerance = 0.00001
         error = 100
         iteration_counter = 1
-        max_iterations = 5
+        max_iterations = 1
         options = {"maxiter":50}
         normalization_domain = (10, 110)
         multiplier = 1.025
@@ -744,7 +744,7 @@ class Bezier:
         return curvature[0], curvature[1]
 
     def peak_curvature(self, x_curve:str, y_curve:str, t_values:list[np.float64]) -> tuple:
-        """returns the sum of curvature over a parametric curve from 0 to 1, returns the calculated curvature and the error associated"""
+        """returns the peak of curvature over a parametric curve from 0 to 1, returns the calculated curvature and the error associated"""
         t = sp.symbols("t", real=True)
         small_val = 0.0000001
         peak_curvature = 0
@@ -760,19 +760,16 @@ class Bezier:
 
         numerator = abs(dx_dt * ddy_dt - dy_dt * ddx_dt)
         denominator = (dx_dt**2  + dy_dt**2)**sp.S(3/2)
-        curvature = sp.lambdify(t, -1 * (numerator / denominator), modules="numpy") #curvature = numerator / denominator, function value negated so that minimization algo can be used
+        curvature = sp.lambdify(t, (numerator / denominator), modules="numpy")
 
-        possible_curvatures, curvature_t_vals = [], []
         print("Curvature function: " + sp.latex(sp.S(numerator / denominator)))
-        for i in range(len(t_values) - 1):
-            t0 = scipy_optimize.minimize_scalar(fun=curvature, method="bounded", bounds=(t_values[i] + small_val, t_values[i + 1] - small_val)).x
 
-            possible_curvatures.append(-1 * curvature(t0))
-            curvature_t_vals.append(t0)
+        #finds the local maxima of the curvature function on the interval (0,1)
+        data = np.linspace(small_val, 1, 997, endpoint=True)
+        curvature_maxima = scipy_signal.argrelextrema(np.array([curvature(x) for x in data]), np.greater)[0]
 
-        index = np.array(possible_curvatures).argmax()
-        peak_curvature = possible_curvatures[index]
-        t_with_greatest_curvature = curvature_t_vals[index]
+        t_with_greatest_curvature = data[curvature_maxima[abs(np.array([curvature(i) for i in curvature_maxima]) - 0.5).argmin()]]
+        peak_curvature = curvature(t_with_greatest_curvature)
 
         return peak_curvature, t_with_greatest_curvature
 
