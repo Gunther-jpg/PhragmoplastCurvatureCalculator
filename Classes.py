@@ -498,7 +498,7 @@ class Bezier:
         tolerance = 0.00001
         error = 100
         iteration_counter = 1
-        max_iterations = 1
+        max_iterations = 5
         options = {"maxiter":50}
         normalization_domain = (10, 110)
         multiplier = 1.025
@@ -582,13 +582,12 @@ class Bezier:
             else:
                 break
 
-        prenormalized_curvature = self.calculate_curvature(x_curve, y_curve, t_values)[0]
         x_curve, y_curve = self.scale_curve(x_curve, y_curve, 1 / sp.S(normalization_info["scale_factor"]))
         #curvature = self.calculate_curvature(x_curve, y_curve, t_values)[0] #calculates total curvature
         curvature = self.peak_curvature(x_curve, y_curve, t_values) #calculates peak curvature
         #curvature = curvature / normalization_info["scale_factor"]
         #print("scale factor: " + str(normalization_info["scale_factor"]) + "\t" + "pre-normalized curvature: " + str(curvature * normalization_info["scale_factor"]) + "\t" + "normalized curvature: " + str(curvature))
-        print("Normalized curvature: " + str(curvature[0]) + "\t" + "Prenormalized curvature: " + str(prenormalized_curvature) + "\t" + "t_with_greatest_curvature: " + str(curvature[1]))
+        print("Normalized curvature: " + str(curvature[0]) + "\t" + "t_with_greatest_curvature: " + str(curvature[1]))
         return curvature[0]
 
     def new_interpolation_point(self, xy:list[float], abs_residues:list[float], t_values:list[float]) -> dict:
@@ -746,7 +745,7 @@ class Bezier:
     def peak_curvature(self, x_curve:str, y_curve:str, t_values:list[np.float64]) -> tuple:
         """returns the peak of curvature over a parametric curve from 0 to 1, returns the calculated curvature and the error associated"""
         t = sp.symbols("t", real=True)
-        small_val = 0.0000001
+        small_val = 0.00001
         peak_curvature = 0
 
         for i in range(len(t_values)):
@@ -765,10 +764,20 @@ class Bezier:
         print("Curvature function: " + sp.latex(sp.S(numerator / denominator)))
 
         #finds the local maxima of the curvature function on the interval (0,1)
-        data = np.linspace(small_val, 1, 997, endpoint=True)
-        curvature_maxima = scipy_signal.argrelextrema(np.array([curvature(x) for x in data]), np.greater)[0]
+        list_of_t_values = np.linspace(small_val, 1, 997, endpoint=True)
 
-        t_with_greatest_curvature = data[curvature_maxima[abs(np.array([curvature(i) for i in curvature_maxima]) - 0.5).argmin()]]
+        #prevents list_of_t_values from containing values in t_values, since values of t near any t_values may result in singularities
+        i = 0
+        while i < len(list_of_t_values):
+            check = [math.isclose(list_of_t_values[i], j, abs_tol=small_val) for j in t_values]
+            if True in check:
+                list_of_t_values = np.delete(list_of_t_values, i)
+            else:
+                i += 1
+
+        curvature_maxima = scipy_signal.argrelextrema(np.array([curvature(x) for x in list_of_t_values]), np.greater)[0]
+
+        t_with_greatest_curvature = list_of_t_values[curvature_maxima[abs(np.array([list_of_t_values[i] for i in curvature_maxima]) - 0.5).argmin()]]
         peak_curvature = curvature(t_with_greatest_curvature)
 
         return peak_curvature, t_with_greatest_curvature
