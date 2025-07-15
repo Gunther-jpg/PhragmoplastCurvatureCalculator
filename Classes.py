@@ -559,13 +559,14 @@ class Bezier:
                 break
             iteration_counter += 1
 
-            #finds 'suitable' values for a new interpolation point
-            true_xy, pred_xy = [list(a) for a in zip(self.error_info["true_x"], self.error_info["true_y"])], [list(a) for a in zip(self.error_info["predicted_x"],self.error_info["predicted_y"])]
-            squared_euclidean_distances = np.empty(0)
-            for i in range(len(self.error_info["true_y"])):
-                squared_euclidean_distances = np.append(squared_euclidean_distances, sqeuclidean(true_xy[i], pred_xy[i]))
+            # #finds 'suitable' values for a new interpolation point
+            # true_xy, pred_xy = [list(a) for a in zip(self.error_info["true_x"], self.error_info["true_y"])], [list(a) for a in zip(self.error_info["predicted_x"],self.error_info["predicted_y"])]
+            # squared_euclidean_distances = np.empty(0)
+            # for i in range(len(self.error_info["true_y"])):
+            #     squared_euclidean_distances = np.append(squared_euclidean_distances, sqeuclidean(true_xy[i], pred_xy[i]))
+            #new_interpolation_point = self.new_interpolation_point(normalized_xy, squared_euclidean_distances, t_values)
 
-            new_interpolation_point = self.new_interpolation_point(normalized_xy, squared_euclidean_distances, t_values)
+            new_interpolation_point = self.new_interpolation_point(normalized_xy, t_values, x_curve, y_curve)
 
             #if 'suitable' values for a new interpolation point were found update control_points, control_weights, t_values, and bounds
             if new_interpolation_point is not None:
@@ -590,90 +591,110 @@ class Bezier:
         print("Normalized curvature: " + str(curvature[0]) + "\t" + "t_with_greatest_curvature: " + str(curvature[1]))
         return curvature[0]
 
-    def new_interpolation_point(self, xy:list[float], abs_residues:list[float], t_values:list[float]) -> dict:
-        """Finds the x, y, and t for the point on the barycentric curve with the highest error, returns None if no further interpolation points are likely to improve error"""
+    def new_interpolation_point(self, normalized_xy, t_values, x_curve, y_curve):
         small_val = 0.0001
         default_t = 0.5 - small_val
+        is_left_to_right = normalized_xy[0][0] < normalized_xy[-1][0]
         t = sp.symbols("t", real=True)
         new_point = {"x":-1, "y":-1, "t":-1}
-        bound = scipy_optimize.Bounds(0)
 
-        # get x_curve and y_curve and turn into a sympy expression
-        x_curve, y_curve = sp.parse_expr(self.curve["x_curve"], local_dict={'t': t}), sp.parse_expr(
-            self.curve["y_curve"], local_dict={'t': t})
+        # ensures x_curve & y_curve are copied appropriately
+        x_curve, y_curve = sp.parse_expr(str(x_curve).replace('j', 't'), local_dict={'t': t}), sp.parse_expr(str(y_curve).replace('j', 't'), local_dict={'t': t})
 
-        dx_dt = sp.lambdify(t, x_curve.diff(t), modules="numpy")
-        dy_dt = sp.lambdify(t, y_curve.diff(t), modules="numpy")
-
+        #lambdify formulas for easy evaluation
         x_curve_lambda, y_curve_lambda = sp.lambdify(t, x_curve, modules="numpy"), sp.lambdify(t, y_curve, modules="numpy")
+        dy_dx = sp.lambdify(t, y_curve.diff(t) / x_curve.diff(t), modules="numpy")
 
-        def dd_dt(k: list[np.float64], *args) -> list:
-            nonlocal x_curve_lambda, y_curve_lambda
-            out = []
-            for i in k:
-                out.append(((x_curve_lambda(i) - args[0]) * dx_dt(i) + (y_curve_lambda(i) - args[1]) * dy_dt(i)))
-            if type(out) == type(None) or None in out: 
-                out = 0
-            return out
-        
-        def dist (k: list[np.float64], *args) -> list:
-            nonlocal x_curve_lambda, y_curve_lambda
-            out = []
-            for i in k:
-                out.append(((args[0]-x_curve_lambda(i))**2 + (args[1]-y_curve_lambda(i))**2)**(0.5))
-            if type(out) == type(None) or None in out: 
-                out = 0
-            return out
+        #coord is the leftmost point of a segment of the polyline, slope is the slope of the line segment,
+        # and length is how long the polyline segment is
+        default_polyline_segment = {"startpoint":(-1,-1), "slope":0, "length":0, "endpoint":(-1,-1), "difference":0}
+        polyline = []
+
+        for i in range(len(normalized_xy) - 1):
+            polyline.append(copy.deepcopy(default_polyline_segment))
+            polyline[-1]["startpoint"] = normalized_xy[i]
+            polyline[-1]["slope"] = (normalized_xy[i + 1][1] - normalized_xy[i][1]) / (normalized_xy[i + 1][0] - normalized_xy[i][0])
+            polyline[-1]["length"] = sqeuclidean(normalized_xy[i], normalized_xy[i + 1])
+            polyline[-1]["endpoint"] = normalized_xy[i + 1]
 
 
-        try:
-            # loops eliminating possible new interpolation points if an interpolation point already exists nears the proposed location
-            while True:
+        def dot_product(ts:list[np.float64], point:list[tuple]):
+            nonlocal x_curve_lambda, y_curve_lambda, dy_dx
+            output = []
 
-                if len(abs_residues) > 0:
-                    index_of_most_error = np.argmax(abs_residues)
-                else:
-                    closest_t = None
-                    break
+            for j in ts:
+                if math.isnan(x_curve_lambda(j)) or math.isnan(y_curve_lambda(j)) or math.isnan(dy_dx(j)):
+                    j += small_val
 
-                if type(index_of_most_error) != np.int64:  #incase np.argmax returns an ndarray
-                    index_of_most_error = index_of_most_error[0]
-                #most likely to break
-                i = 0
-                is_close, closest_t = [], []
-                while True:
-                    closest_t = scipy_optimize.minimize(fun=dist, x0=t_values[i]+small_val, args=xy[index_of_most_error], bounds=bound, method="Nelder-Mead").x[0]
+                curve_tangent = dy_dx(j)
+                point_to_curve_vector = (point[0][0] - x_curve_lambda(j), point[0][1] - y_curve_lambda(j))
+                output.append(abs(1 * point_to_curve_vector[0] + curve_tangent * point_to_curve_vector[1]))
 
-                    is_close = [math.isclose(closest_t, t, abs_tol = small_val, rel_tol=0.05) for t in t_values] #determines if closest_t is around one of the singularities that occur at t_vals
+            return output
 
-                    if not (True in is_close) and 0 <= closest_t <= 1: #if closest_t is not near a singularity, it is probably is correct, so break the loop
-                        break
+        #finds the differences between the polyline and the current parametric curve and stores it in polylines difference attribute
+        for i in range(len(polyline)):
+            t0 = scipy_optimize.minimize(fun=dot_product, x0=default_t, args=[polyline[i]["startpoint"]], method="Nelder-Mead", bounds=[(small_val,1-small_val)]).x[0]
+            t1 = scipy_optimize.minimize(fun=dot_product, x0=default_t, args=[polyline[i]["endpoint"]], method="Nelder-Mead", bounds=[(small_val,1-small_val)]).x[0]
 
-                    if len(t_values) == i + 1: #if every t_value has been used for x0 for minimize, break
-                        closest_t = None
-                        break
+            # list coords clockwise, required for shoelace formula
+            if is_left_to_right:
+                coords = [polyline[i]["startpoint"], polyline[i]["endpoint"], (x_curve_lambda(t1), y_curve_lambda(t1)),
+                          (x_curve_lambda(t0), y_curve_lambda(t0))]
+            else:
+                coords = [polyline[i]["startpoint"], (x_curve_lambda(t0), y_curve_lambda(t0)),
+                          (x_curve_lambda(t1), y_curve_lambda(t1)), polyline[i]["endpoint"]]
 
-                    i += 1
+            #implementation of the shoelace formula
+            area = 0
+            for j in range(len(coords)):
+                area += coords[j][1] * (coords[(j - 1) % 4][0] - coords[(j + 1) % 4][0])
+            area = 0.5 * area
 
-                #if no valid t value could be found, remove the selected item from abs_residues then loop again only if there is more than 1 item left in abs_residues
-                #otherwise, if a 'good' t_value was found, break
-                if closest_t is None:
-                    abs_residues = np.delete(arr=abs_residues, obj=index_of_most_error)
-                elif len(abs_residues) <= 1:
-                    closest_t = None
-                    break
-                else:
-                    break
-        except:
-            return None
-                
+            polyline[i]["difference"] = area
+
+        #where a region consists of consecutive segments from polyline that share the same difference's sign.
+        default_region = {"total_difference":0, "included_segments":[0,0]}
+        regions = []
+
+        #fills regions
+        total = 0
+        for i in range(len(polyline)):
+            #if i > 0 and sign(polyline[i - 1]["difference"]) == sign(polyline[i]["difference"])
+            if i > 0 and polyline[i - 1]["difference"] / abs(polyline[i - 1]["difference"]) == polyline[i]["difference"] / abs(polyline[i]["difference"]):
+
+                total += polyline[i]["difference"]
+
+            #if sign(polyline[i - 1]["difference"]) != sign(polyline[i]["difference"])
+            elif i > 0:
+                regions[-1]["total_difference"] = total
+                regions[-1]["included_segments"][1] = i - 1
+
+                regions.append(copy.deepcopy(default_region))
+                regions[-1]["included_segments"][0] = i
+
+                total = polyline[i]["difference"]
+
+            elif i == 0:
+                regions.append(copy.deepcopy(default_region))
+                total = polyline[i]["difference"]
 
 
-        if closest_t is None:
-            new_point = None
-        else:
-            new_point["t"] = closest_t
-            new_point["x"], new_point["y"] = x_curve_lambda(closest_t), y_curve_lambda(closest_t)
+        #find the largest absolute difference between polyline and the parametric curve
+        abs_maximum, index = abs(regions[0]["total_difference"]), 0
+        for i in range(1, len(regions)):
+            if abs(regions[i]["total_difference"]) > abs_maximum:
+                abs_maximum = abs(regions[i]["total_difference"])
+                index = i
+
+
+        #proposese a new interpolation point near the middle of the region of greatest error,
+        # checks if it is too close to an existing point, if so selects a new point
+
+        index = int((regions[index]["included_segments"][0] + regions[index]["included_segments"][1]) / 2)
+        closest_t = scipy_optimize.minimize(fun=dot_product, x0=default_t, args=[polyline[index]["startpoint"]], method="Nelder-Mead", bounds=[(small_val,1-small_val)]).x[0]
+
+        new_point["t"], new_point["x"], new_point["y"] = closest_t, x_curve_lambda(closest_t), y_curve_lambda(closest_t)
         return new_point
 
     #Implementation of proposition 7 from Ramanantoanina and Hormann's 2021 paper "New shape control tools for rational Bézier curve design"
