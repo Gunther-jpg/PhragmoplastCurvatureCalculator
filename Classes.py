@@ -559,6 +559,9 @@ class Bezier:
                 break
             iteration_counter += 1
 
+            if iteration_counter == 4 or iteration_counter == 3:
+                pass
+
             new_interpolation_point = self.new_interpolation_point(normalized_xy, t_values, x_curve, y_curve)
 
             #if 'suitable' values for a new interpolation point were found update control_points, control_weights, t_values, and bounds
@@ -580,7 +583,6 @@ class Bezier:
         #curvature = self.calculate_curvature(x_curve, y_curve, t_values)[0] #calculates total curvature
         curvature = self.peak_curvature(x_curve, y_curve, t_values) #calculates peak curvature
         #curvature = curvature / normalization_info["scale_factor"]
-        #print("scale factor: " + str(normalization_info["scale_factor"]) + "\t" + "pre-normalized curvature: " + str(curvature * normalization_info["scale_factor"]) + "\t" + "normalized curvature: " + str(curvature))
         print("Normalized curvature: " + str(curvature[0]) + "\t" + "t_with_greatest_curvature: " + str(curvature[1]))
         return curvature[0]
 
@@ -650,11 +652,16 @@ class Bezier:
         default_region = {"total_difference":0, "included_segments":[0,0]}
         regions = []
 
-        #fills regions
+        #populates regions
         total = 0
         for i in range(len(polyline)):
+            #if polyline[i] is the last value in polyline
+            if i == len(polyline) - 1:
+                regions[-1]["total_difference"] = total
+                regions[-1]["included_segments"][1] = i
+
             #if i > 0 and sign(polyline[i - 1]["difference"]) == sign(polyline[i]["difference"])
-            if i > 0 and polyline[i - 1]["difference"] / abs(polyline[i - 1]["difference"]) == polyline[i]["difference"] / abs(polyline[i]["difference"]):
+            elif i > 0 and polyline[i - 1]["difference"] / abs(polyline[i - 1]["difference"]) == polyline[i]["difference"] / abs(polyline[i]["difference"]):
 
                 total += polyline[i]["difference"]
 
@@ -680,14 +687,16 @@ class Bezier:
                 abs_maximum = abs(regions[i]["total_difference"])
                 index = i
 
+        if len(regions) >= 1 and regions[0]["total_difference"] != 0 and regions[0]["included_segments"] != [0,0]:
+            index = int((regions[index]["included_segments"][0] + regions[index]["included_segments"][1]) / 2)
+            closest_t = scipy_optimize.minimize(fun=dot_product, x0=default_t, args=[polyline[index]["startpoint"]],
+                                                method="Nelder-Mead", bounds=[(small_val, 1 - small_val)]).x[0]
 
-        #proposese a new interpolation point near the middle of the region of greatest error,
-        # checks if it is too close to an existing point, if so selects a new point
+            new_point["t"], new_point["x"], new_point["y"] = closest_t, x_curve_lambda(closest_t), y_curve_lambda(closest_t)
 
-        index = int((regions[index]["included_segments"][0] + regions[index]["included_segments"][1]) / 2)
-        closest_t = scipy_optimize.minimize(fun=dot_product, x0=default_t, args=[polyline[index]["startpoint"]], method="Nelder-Mead", bounds=[(small_val,1-small_val)]).x[0]
+        else:
+            new_point = None
 
-        new_point["t"], new_point["x"], new_point["y"] = closest_t, x_curve_lambda(closest_t), y_curve_lambda(closest_t)
         return new_point
 
     #Implementation of proposition 7 from Ramanantoanina and Hormann's 2021 paper "New shape control tools for rational Bézier curve design"
