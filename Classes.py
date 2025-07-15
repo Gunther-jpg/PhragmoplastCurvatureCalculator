@@ -559,13 +559,6 @@ class Bezier:
                 break
             iteration_counter += 1
 
-            # #finds 'suitable' values for a new interpolation point
-            # true_xy, pred_xy = [list(a) for a in zip(self.error_info["true_x"], self.error_info["true_y"])], [list(a) for a in zip(self.error_info["predicted_x"],self.error_info["predicted_y"])]
-            # squared_euclidean_distances = np.empty(0)
-            # for i in range(len(self.error_info["true_y"])):
-            #     squared_euclidean_distances = np.append(squared_euclidean_distances, sqeuclidean(true_xy[i], pred_xy[i]))
-            #new_interpolation_point = self.new_interpolation_point(normalized_xy, squared_euclidean_distances, t_values)
-
             new_interpolation_point = self.new_interpolation_point(normalized_xy, t_values, x_curve, y_curve)
 
             #if 'suitable' values for a new interpolation point were found update control_points, control_weights, t_values, and bounds
